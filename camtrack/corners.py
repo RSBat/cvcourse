@@ -48,14 +48,18 @@ class _CornerStorageBuilder:
 
 def _build_impl(frame_sequence: pims.FramesSequence,
                 builder: _CornerStorageBuilder) -> None:
+    CORNERS_TO_TRACK = 1000
     BLOCK_SIZE = 7
+    MIN_DISTANCE = 7
     lk_params = dict(winSize=(15, 15),
                      maxLevel=2,
                      criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
 
     image_0 = frame_sequence[0]
-    corners = cv2.goodFeaturesToTrack(image_0, 1000, 0.01, 7, blockSize=BLOCK_SIZE).reshape(-1, 2)
+    corners = cv2.goodFeaturesToTrack(image_0, CORNERS_TO_TRACK, 0.01,
+                                      MIN_DISTANCE, blockSize=BLOCK_SIZE).reshape(-1, 2)
     ids = np.arange(corners.shape[0]).reshape(-1, 1)
+    max_id = ids.max()
 
     frame_corners = FrameCorners(
         ids,
@@ -65,25 +69,43 @@ def _build_impl(frame_sequence: pims.FramesSequence,
     builder.set_corners_at_frame(0, frame_corners)
 
     for frame, image_1 in enumerate(frame_sequence[1:], 1):
-        new_corners, status, err = cv2.calcOpticalFlowPyrLK((255*image_0).astype("uint8"),
-                                                            (255*image_1).astype("uint8"),
-                                                            corners, None, **lk_params)
+        # track existing corners
+        moved_corners, status, err = cv2.calcOpticalFlowPyrLK((255*image_0).astype("uint8"),
+                                                              (255*image_1).astype("uint8"),
+                                                              corners, None, **lk_params)
 
         status1d = status.reshape(-1)
 
-        good_corners = new_corners[status1d == 1]
+        good_corners = moved_corners[status1d == 1]
         good_ids = ids[status1d == 1]
 
+        # find new corners
+        additional_corners = CORNERS_TO_TRACK - good_corners.shape[0]
+
+        new_corners = np.ndarray((0, 2), dtype=np.float32)
+        new_ids = np.ndarray((0, 1), dtype=int)
+        if additional_corners > 0:
+            mask = 255 * np.ones_like(image_1, dtype=np.uint8)
+            for x, y in [np.int32(corner) for corner in good_corners]:
+                cv2.circle(mask, (x, y), MIN_DISTANCE, 0, -1)
+            new_corners = cv2.goodFeaturesToTrack(image_1, additional_corners, 0.01,
+                                                  MIN_DISTANCE, blockSize=BLOCK_SIZE, mask=mask)
+            if new_corners is not None:
+                new_corners = new_corners.reshape(-1, 2)
+                new_ids = np.arange(max_id + 1, max_id + 1 + new_corners.shape[0]).reshape(-1, 1)
+                max_id = max(max_id, new_ids.max())
+
+        corners = np.vstack([good_corners, new_corners])
+        ids = np.vstack([good_ids, new_ids])
+
         frame_corners = FrameCorners(
-            good_ids,
-            good_corners,
-            np.repeat(BLOCK_SIZE, good_corners.shape[0]),
+            ids,
+            corners,
+            np.repeat(BLOCK_SIZE, corners.shape[0]),
         )
         builder.set_corners_at_frame(frame, frame_corners)
 
         image_0 = image_1
-        corners = good_corners.reshape(-1, 1, 2)
-        ids = good_ids
 
 
 def build(frame_sequence: pims.FramesSequence,
