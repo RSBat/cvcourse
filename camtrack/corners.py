@@ -122,6 +122,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
             high_quality_ids,
             high_quality_corners,
             np.repeat(BLOCK_SIZE, high_quality_corners.shape[0]),
+            corners_quality[high_quality_corners_mask],
         )
         builder.set_corners_at_frame(frame, frame_corners)
 
