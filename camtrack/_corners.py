@@ -240,6 +240,21 @@ def without_short_tracks(corner_storage: CornerStorage,
     return StorageFilter(corner_storage, predicate)
 
 
+def with_min_quality(corner_storage: CornerStorage,
+                     min_quality: float) -> CornerStorage:
+    """
+    Create corner storage wrapper to filter out low quality corners.
+
+    :param corner_storage: storage to wrap.
+    :param min_quality: min allowed corner quality.
+    :return: filtered corner storage.
+    """
+    def predicate(corners):
+        return corners.quality >= min_quality
+
+    return StorageFilter(corner_storage, predicate)
+
+
 def dump(corner_storage: CornerStorage, stream: IO[bytes]) -> None:
     """
     Dump corner storage.
