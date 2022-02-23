@@ -80,6 +80,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
     BLOCK_SIZE = 7
     MIN_DISTANCE = 7
     QUALITY_LEVEL = 0.02
+    EXISTING_CORNER_QUALITY_MODIFIER = 0.1
     detection_params = {
         "qualityLevel": QUALITY_LEVEL,
         "minDistance": MIN_DISTANCE,
@@ -116,20 +117,22 @@ def _build_impl(frame_sequence: pims.FramesSequence,
         max_id = max(max_id, new_ids.max(initial=0.0))
 
         # combine corners
-        corners = np.vstack([good_corners, new_corners])
-        ids = np.vstack([good_ids, new_ids])
+        combined_corners = np.vstack([good_corners, new_corners])
+        combined_ids = np.vstack([good_ids, new_ids])
 
         # calculate corners quality
-        corners_quality = get_quality(image_1, corners, BLOCK_SIZE)
+        corners_quality = get_quality(image_1, combined_corners, BLOCK_SIZE)
         max_quality = corners_quality.max(initial=0.0)
 
         # filter out low quality corners
-        min_quality_threshold = np.repeat(max_quality * QUALITY_LEVEL, corners.shape[0])
-        min_quality_threshold[:good_corners.shape[0]] *= 0.7
+        # same approach as in `goodFeaturesToTrack`
+        # but because we are masking out existing corners, we have to do it manually
+        min_quality_threshold = np.repeat(max_quality * QUALITY_LEVEL, combined_corners.shape[0])
+        min_quality_threshold[:good_corners.shape[0]] *= EXISTING_CORNER_QUALITY_MODIFIER
 
         high_quality_corners_mask = corners_quality > min_quality_threshold
-        high_quality_corners = corners[high_quality_corners_mask]
-        high_quality_ids = ids[high_quality_corners_mask]
+        high_quality_corners = combined_corners[high_quality_corners_mask]
+        high_quality_ids = combined_ids[high_quality_corners_mask]
 
         frame_corners = FrameCorners(
             high_quality_ids,
