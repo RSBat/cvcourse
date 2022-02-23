@@ -34,9 +34,9 @@ class FrameCorners:
     (np.searchsorted).
     """
 
-    __slots__ = ('_ids', '_points', '_sizes')
+    __slots__ = ('_ids', '_points', '_sizes', '_quality', '_harris_score')
 
-    def __init__(self, ids, points, sizes):
+    def __init__(self, ids, points, sizes, quality=None, harris_score=None):
         """
         Construct FrameCorners.
 
@@ -51,6 +51,16 @@ class FrameCorners:
         self._points = points[sorting_idx].reshape(-1, 2)
         self._sizes = sizes[sorting_idx].reshape(-1, 1)
 
+        if quality is not None:
+            self._quality = quality[sorting_idx].reshape(-1, 1)
+        else:
+            self._quality = np.zeros_like(self.ids)
+
+        if harris_score is not None:
+            self._harris_score = quality[sorting_idx].reshape(-1, 1)
+        else:
+            self._harris_score = np.zeros_like(self.ids)
+
     @property
     def ids(self):
         return self._ids
@@ -62,6 +72,14 @@ class FrameCorners:
     @property
     def sizes(self):
         return self._sizes
+
+    @property
+    def quality(self):
+        return self._quality
+
+    @property
+    def harris_score(self):
+        return self._harris_score
 
     def __iter__(self):
         yield self.ids
@@ -227,6 +245,36 @@ def without_short_tracks(corner_storage: CornerStorage,
 
     def predicate(corners):
         return counter[corners.ids.flatten()] >= min_len
+
+    return StorageFilter(corner_storage, predicate)
+
+
+def with_min_quality(corner_storage: CornerStorage,
+                     min_quality: float) -> CornerStorage:
+    """
+    Create corner storage wrapper to filter out low quality corners.
+
+    :param corner_storage: storage to wrap.
+    :param min_quality: min allowed corner quality.
+    :return: filtered corner storage.
+    """
+    def predicate(corners):
+        return corners.quality >= min_quality
+
+    return StorageFilter(corner_storage, predicate)
+
+
+def with_min_harris_score(corner_storage: CornerStorage,
+                          min_score: float) -> CornerStorage:
+    """
+    Create corner storage wrapper to filter out corners with low Harris score.
+
+    :param corner_storage: storage to wrap.
+    :param min_score: min allowed Harris score.
+    :return: filtered corner storage.
+    """
+    def predicate(corners):
+        return corners.harris_score >= min_score
 
     return StorageFilter(corner_storage, predicate)
 
