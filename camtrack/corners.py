@@ -94,10 +94,12 @@ def _build_impl(frame_sequence: pims.FramesSequence,
     corners, ids = detect_corners(image_0, None, 0, detection_params)
     max_id = ids.max()
 
+    corners_quality = get_quality(image_0, corners, BLOCK_SIZE)
     frame_corners = FrameCorners(
         ids,
         corners,
         np.repeat(BLOCK_SIZE, corners.shape[0]),
+        corners_quality,
     )
     builder.set_corners_at_frame(0, frame_corners)
 
