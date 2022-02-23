@@ -46,6 +46,26 @@ class _CornerStorageBuilder:
         return StorageImpl(item[1] for item in sorted(self._corners.items()))
 
 
+def detect_corners(image, existing_corners, start_id, detection_params: dict):
+    mask = None
+    if existing_corners is not None:
+        mask = 255 * np.ones_like(image, dtype=np.uint8)
+        radius = detection_params["minDistance"]
+        for x, y in [np.int32(corner) for corner in existing_corners]:
+            cv2.circle(mask, (x, y), radius, 0, -1)
+
+    detected_corners = cv2.goodFeaturesToTrack(image, 0, mask=mask, **detection_params)
+
+    if detected_corners is not None:
+        corners = detected_corners.reshape(-1, 2)
+        ids = np.arange(start_id, start_id + corners.shape[0]).reshape(-1, 1)
+        return corners, ids
+    else:
+        corners = np.ndarray((0, 2), dtype=np.float32)
+        ids = np.ndarray((0, 1), dtype=np.float32)
+        return corners, ids
+
+
 def get_quality(image, corners, block_size) -> np.ndarray:
     min_eigenvals = np.transpose(cv2.cornerMinEigenVal(image, block_size))
 
@@ -60,14 +80,17 @@ def _build_impl(frame_sequence: pims.FramesSequence,
     BLOCK_SIZE = 7
     MIN_DISTANCE = 7
     QUALITY_LEVEL = 0.02
+    detection_params = {
+        "qualityLevel": QUALITY_LEVEL,
+        "minDistance": MIN_DISTANCE,
+        "blockSize": BLOCK_SIZE,
+    }
     lk_params = dict(winSize=(15, 15),
                      maxLevel=2,
                      criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
 
     image_0 = frame_sequence[0]
-    corners = cv2.goodFeaturesToTrack(image_0, 0, QUALITY_LEVEL,
-                                      MIN_DISTANCE, blockSize=BLOCK_SIZE).reshape(-1, 2)
-    ids = np.arange(corners.shape[0]).reshape(-1, 1)
+    corners, ids = detect_corners(image_0, None, 0, detection_params)
     max_id = ids.max()
 
     frame_corners = FrameCorners(
@@ -89,18 +112,8 @@ def _build_impl(frame_sequence: pims.FramesSequence,
         good_ids = ids[status1d == 1]
 
         # find new corners
-        new_corners = np.ndarray((0, 2), dtype=np.float32)
-        new_ids = np.ndarray((0, 1), dtype=int)
-
-        mask = 255 * np.ones_like(image_1, dtype=np.uint8)
-        for x, y in [np.int32(corner) for corner in good_corners]:
-            cv2.circle(mask, (x, y), MIN_DISTANCE, 0, -1)
-        detected_corners = cv2.goodFeaturesToTrack(image_1, 0, QUALITY_LEVEL,
-                                                   MIN_DISTANCE, blockSize=BLOCK_SIZE, mask=mask)
-        if detected_corners is not None:
-            new_corners = detected_corners.reshape(-1, 2)
-            new_ids = np.arange(max_id + 1, max_id + 1 + new_corners.shape[0]).reshape(-1, 1)
-            max_id = max(max_id, new_ids.max())
+        new_corners, new_ids = detect_corners(image_1, good_corners, max_id + 1, detection_params)
+        max_id = max(max_id, new_ids.max(initial=0.0))
 
         # combine corners
         corners = np.vstack([good_corners, new_corners])
