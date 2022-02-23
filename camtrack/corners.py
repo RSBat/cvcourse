@@ -12,6 +12,8 @@ __all__ = [
     'without_short_tracks'
 ]
 
+from typing import Tuple
+
 import click
 import cv2
 import numpy as np
@@ -66,13 +68,19 @@ def detect_corners(image, existing_corners, start_id, detection_params: dict):
         return corners, ids
 
 
-def get_quality(image, corners, block_size) -> np.ndarray:
-    min_eigenvals = np.transpose(cv2.cornerMinEigenVal(image, block_size))
+def get_quality(image, corners: np.ndarray, block_size: int, harris_k: float = 0.04) -> Tuple[np.ndarray, np.ndarray]:
+    eigens = cv2.cornerEigenValsAndVecs(image, block_size, ksize=3)
+    eigenvals: np.ndarray = np.transpose(eigens[:, :, :2], axes=(1, 0, 2))
 
+    min_eigenvals = eigenvals.min(initial=None, axis=2)
     valid_positions = min_eigenvals.shape[0] - 1, min_eigenvals.shape[1] - 1
     int_corners = np.clip(corners.round().astype(int), a_min=0, a_max=valid_positions)
     corners_quality = min_eigenvals[int_corners[:, 0], int_corners[:, 1]]
-    return corners_quality
+
+    trace = eigenvals.sum(axis=2)
+    harris_score = eigenvals.prod(axis=2) - harris_k * trace * trace
+    harris_corners_score = harris_score[int_corners[:, 0], int_corners[:, 1]]
+    return corners_quality, harris_corners_score
 
 
 def _build_impl(frame_sequence: pims.FramesSequence,
@@ -94,12 +102,13 @@ def _build_impl(frame_sequence: pims.FramesSequence,
     corners, ids = detect_corners(image_0, None, 0, detection_params)
     max_id = ids.max()
 
-    corners_quality = get_quality(image_0, corners, BLOCK_SIZE)
+    corners_quality, harris_score = get_quality(image_0, corners, BLOCK_SIZE)
     frame_corners = FrameCorners(
         ids,
         corners,
         np.repeat(BLOCK_SIZE, corners.shape[0]),
         corners_quality,
+        harris_score,
     )
     builder.set_corners_at_frame(0, frame_corners)
 
@@ -116,14 +125,14 @@ def _build_impl(frame_sequence: pims.FramesSequence,
 
         # find new corners
         new_corners, new_ids = detect_corners(image_1, good_corners, max_id + 1, detection_params)
-        max_id = max(max_id, new_ids.max(initial=0.0))
+        max_id = max(max_id, new_ids.max(initial=0))
 
         # combine corners
         combined_corners = np.vstack([good_corners, new_corners])
         combined_ids = np.vstack([good_ids, new_ids])
 
         # calculate corners quality
-        corners_quality = get_quality(image_1, combined_corners, BLOCK_SIZE)
+        corners_quality, harris_score = get_quality(image_1, combined_corners, BLOCK_SIZE)
         max_quality = corners_quality.max(initial=0.0)
 
         # filter out low quality corners
@@ -141,6 +150,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
             high_quality_corners,
             np.repeat(BLOCK_SIZE, high_quality_corners.shape[0]),
             corners_quality[high_quality_corners_mask],
+            harris_score[high_quality_corners_mask],
         )
         builder.set_corners_at_frame(frame, frame_corners)
 
