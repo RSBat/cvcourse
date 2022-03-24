@@ -23,6 +23,20 @@ from _camtrack import (
 )
 
 
+def triangulate(vm_1, vm_2, corners_1, corners_2, intrinsic_mat):
+    id_inter, (idx_1, idx_2) = snp.intersect(corners_1.ids.flatten(), corners_2.ids.flatten(), indices=True)
+
+    cloud = cv2.triangulatePoints(
+        intrinsic_mat @ vm_1,
+        intrinsic_mat @ vm_2,
+        corners_1.points[idx_1].T,
+        corners_2.points[idx_2].T,
+    ).T
+    cloud /= cloud[:, 3].reshape(-1, 1)
+    cloud = cloud[:, :3]
+    return id_inter, cloud
+
+
 def track_and_calc_colors(camera_parameters: CameraParameters,
                           corner_storage: CornerStorage,
                           frame_sequence_path: str,
@@ -40,27 +54,21 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
     vm_1 = pose_to_view_mat3x4(known_view_1[1])
     vm_2 = pose_to_view_mat3x4(known_view_2[1])
-    f1_corners = corner_storage[known_view_1[0]]
-    f2_corners = corner_storage[known_view_2[0]]
-    id_inter, (idx_1, idx_2) = snp.intersect(f1_corners.ids.flatten(), f2_corners.ids.flatten(), indices=True)
-
-    cloud = cv2.triangulatePoints(
-        intrinsic_mat @ vm_1,
-        intrinsic_mat @ vm_2,
-        f1_corners.points[idx_1].T,
-        f2_corners.points[idx_2].T,
-    ).T
-    cloud /= cloud[:, 3].reshape(-1, 1)
-    cloud = cloud[:, :3]
+    id_inter, cloud = triangulate(vm_1, vm_2,
+                                  corner_storage[known_view_1[0]],
+                                  corner_storage[known_view_2[0]],
+                                  intrinsic_mat)
     point_cloud_builder = PointCloudBuilder(id_inter,
                                             cloud)
 
     view_mats = []
     for frame, corners in enumerate(corner_storage):
         ids, (lhs, rhs) = snp.intersect(id_inter.flatten(), corners.ids.flatten(), indices=True)
-        _, rvec, tvec = cv2.solvePnP(cloud[lhs].copy(), corners.points[rhs].copy(), intrinsic_mat, None)
+        _, rvec, tvec, _ = cv2.solvePnPRansac(cloud[lhs].copy(), corners.points[rhs].copy(), intrinsic_mat, None)
         pose = Pose(cv2.Rodrigues(-rvec)[0], -cv2.Rodrigues(-rvec)[0] @ tvec)
-        view_mats.append(pose_to_view_mat3x4(pose))
+
+        vm = pose_to_view_mat3x4(pose)
+        view_mats.append(vm)
 
     view_mats[known_view_1[0]] = pose_to_view_mat3x4(known_view_1[1])
     view_mats[known_view_2[0]] = pose_to_view_mat3x4(known_view_2[1])
