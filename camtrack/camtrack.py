@@ -6,7 +6,9 @@ __all__ = [
 
 from typing import List, Optional, Tuple
 
+import cv2
 import numpy as np
+import sortednp as snp
 
 from corners import CornerStorage
 from data3d import CameraParameters, PointCloud, Pose
@@ -36,12 +38,27 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         rgb_sequence[0].shape[0]
     )
 
-    # TODO: implement
+    vm_1 = pose_to_view_mat3x4(known_view_1[1])
+    vm_2 = pose_to_view_mat3x4(known_view_2[1])
+    f1_corners = corner_storage[known_view_1[0]]
+    f2_corners = corner_storage[known_view_2[0]]
+    id_inter, (idx_1, idx_2) = snp.intersect(f1_corners.ids.flatten(), f2_corners.ids.flatten(), indices=True)
+    print(idx_1)
+
+    cloud = cv2.triangulatePoints(
+        intrinsic_mat @ vm_1,
+        intrinsic_mat @ vm_2,
+        f1_corners.points[idx_1].T,
+        f2_corners.points[idx_2].T,
+    ).T
+    cloud /= cloud[:, 3].reshape(-1, 1)
+    cloud = cloud[:, :3]
+
     frame_count = len(corner_storage)
     view_mats = [pose_to_view_mat3x4(known_view_1[1])] * frame_count
-    corners_0 = corner_storage[0]
-    point_cloud_builder = PointCloudBuilder(corners_0.ids[:1],
-                                            np.zeros((1, 3)))
+    view_mats[known_view_2[0]] = pose_to_view_mat3x4(known_view_2[1])
+    point_cloud_builder = PointCloudBuilder(id_inter,
+                                            cloud)
 
     calc_point_cloud_colors(
         point_cloud_builder,
