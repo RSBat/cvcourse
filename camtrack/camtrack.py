@@ -43,7 +43,6 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     f1_corners = corner_storage[known_view_1[0]]
     f2_corners = corner_storage[known_view_2[0]]
     id_inter, (idx_1, idx_2) = snp.intersect(f1_corners.ids.flatten(), f2_corners.ids.flatten(), indices=True)
-    print(idx_1)
 
     cloud = cv2.triangulatePoints(
         intrinsic_mat @ vm_1,
@@ -53,12 +52,18 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     ).T
     cloud /= cloud[:, 3].reshape(-1, 1)
     cloud = cloud[:, :3]
-
-    frame_count = len(corner_storage)
-    view_mats = [pose_to_view_mat3x4(known_view_1[1])] * frame_count
-    view_mats[known_view_2[0]] = pose_to_view_mat3x4(known_view_2[1])
     point_cloud_builder = PointCloudBuilder(id_inter,
                                             cloud)
+
+    view_mats = []
+    for frame, corners in enumerate(corner_storage):
+        ids, (lhs, rhs) = snp.intersect(id_inter.flatten(), corners.ids.flatten(), indices=True)
+        _, rvec, tvec = cv2.solvePnP(cloud[lhs].copy(), corners.points[rhs].copy(), intrinsic_mat, None)
+        pose = Pose(cv2.Rodrigues(-rvec)[0], -cv2.Rodrigues(-rvec)[0] @ tvec)
+        view_mats.append(pose_to_view_mat3x4(pose))
+
+    view_mats[known_view_1[0]] = pose_to_view_mat3x4(known_view_1[1])
+    view_mats[known_view_2[0]] = pose_to_view_mat3x4(known_view_2[1])
 
     calc_point_cloud_colors(
         point_cloud_builder,
