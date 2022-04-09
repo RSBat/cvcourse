@@ -23,6 +23,9 @@ from _camtrack import (
 )
 
 
+MAX_REPROJ_ERROR = 5.0
+
+
 def triangulate(vm_1, vm_2, corners_1, corners_2, intrinsic_mat):
     id_inter, (idx_1, idx_2) = snp.intersect(corners_1.ids.flatten(), corners_2.ids.flatten(), indices=True)
 
@@ -54,24 +57,31 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
     vm_1 = pose_to_view_mat3x4(known_view_1[1])
     vm_2 = pose_to_view_mat3x4(known_view_2[1])
-    id_inter, cloud = triangulate(vm_1, vm_2,
-                                  corner_storage[known_view_1[0]],
-                                  corner_storage[known_view_2[0]],
-                                  intrinsic_mat)
-    point_cloud_builder = PointCloudBuilder(id_inter,
+    id_triangulated, cloud = triangulate(vm_1, vm_2,
+                                         corner_storage[known_view_1[0]],
+                                         corner_storage[known_view_2[0]],
+                                         intrinsic_mat)
+    point_cloud_builder = PointCloudBuilder(id_triangulated,
                                             cloud)
 
     view_mats = []
     for frame, corners in enumerate(corner_storage):
-        ids, (lhs, rhs) = snp.intersect(id_inter.flatten(), corners.ids.flatten(), indices=True)
-        _, rvec, tvec, _ = cv2.solvePnPRansac(cloud[lhs].copy(), corners.points[rhs].copy(), intrinsic_mat, None)
+        ids, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
+        _, rvec, tvec, _ = cv2.solvePnPRansac(point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
+                                              intrinsic_mat, None)
         pose = Pose(cv2.Rodrigues(-rvec)[0], -cv2.Rodrigues(-rvec)[0] @ tvec)
 
         vm = pose_to_view_mat3x4(pose)
         view_mats.append(vm)
 
-    view_mats[known_view_1[0]] = pose_to_view_mat3x4(known_view_1[1])
-    view_mats[known_view_2[0]] = pose_to_view_mat3x4(known_view_2[1])
+        if frame > 10:
+            reference = max(0, frame - 10)
+            new_triang_id, new_cloud = triangulate(view_mats[reference], vm, corner_storage[reference],
+                                                   corners, intrinsic_mat)
+            point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
+
+    view_mats[known_view_1[0]] = vm_1
+    view_mats[known_view_2[0]] = vm_2
 
     calc_point_cloud_colors(
         point_cloud_builder,
@@ -79,7 +89,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         view_mats,
         intrinsic_mat,
         corner_storage,
-        5.0
+        MAX_REPROJ_ERROR,
     )
     point_cloud = point_cloud_builder.build_point_cloud()
     poses = list(map(view_mat3x4_to_pose, view_mats))
