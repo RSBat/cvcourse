@@ -19,15 +19,25 @@ from _camtrack import (
     calc_point_cloud_colors,
     pose_to_view_mat3x4,
     to_opencv_camera_mat3x3,
-    view_mat3x4_to_pose
+    view_mat3x4_to_pose,
+    calc_inlier_indices,
 )
 
 
 MAX_REPROJ_ERROR = 5.0
 
 
+def filter_reprojection(cloud_ids, cloud_points,
+                        corner_ids, corner_points,
+                        intrinsic_mat, view_mat):
+    _, (cloud_idx, corner_idx) = snp.intersect(cloud_ids.flatten(), corner_ids.flatten(), indices=True)
+    proj_mat = intrinsic_mat @ view_mat
+    good_points = calc_inlier_indices(cloud_points[cloud_idx], corner_points[corner_idx], proj_mat, MAX_REPROJ_ERROR)
+    return cloud_ids[cloud_idx][good_points], cloud_points[cloud_idx][good_points]
+
+
 def triangulate(vm_1, vm_2, corners_1, corners_2, intrinsic_mat):
-    id_inter, (idx_1, idx_2) = snp.intersect(corners_1.ids.flatten(), corners_2.ids.flatten(), indices=True)
+    ids, (idx_1, idx_2) = snp.intersect(corners_1.ids.flatten(), corners_2.ids.flatten(), indices=True)
 
     cloud = cv2.triangulatePoints(
         intrinsic_mat @ vm_1,
@@ -37,7 +47,11 @@ def triangulate(vm_1, vm_2, corners_1, corners_2, intrinsic_mat):
     ).T
     cloud /= cloud[:, 3].reshape(-1, 1)
     cloud = cloud[:, :3]
-    return id_inter, cloud
+
+    ids, cloud = filter_reprojection(ids, cloud, corners_1.ids, corners_1.points, intrinsic_mat, vm_1)
+    ids, cloud = filter_reprojection(ids, cloud, corners_2.ids, corners_2.points, intrinsic_mat, vm_2)
+
+    return ids, cloud
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
