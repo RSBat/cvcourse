@@ -57,6 +57,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
     view_mats = []
     for frame, corners in enumerate(corner_storage):
+        print(f"\rProcessing frame {frame + 1}/{len(corner_storage)}")
         _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
         _, rvec, tvec, _ = cv2.solvePnPRansac(point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
                                               intrinsic_mat, None)
