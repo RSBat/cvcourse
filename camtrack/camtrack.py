@@ -15,43 +15,21 @@ from data3d import CameraParameters, PointCloud, Pose
 import frameseq
 from _camtrack import (
     PointCloudBuilder,
+    TriangulationParameters,
+    build_correspondences,
     create_cli,
     calc_point_cloud_colors,
     pose_to_view_mat3x4,
     to_opencv_camera_mat3x3,
-    view_mat3x4_to_pose,
-    calc_inlier_indices,
+    triangulate_correspondences,
+    view_mat3x4_to_pose, rodrigues_and_translation_to_view_mat3x4,
 )
 
 
 MAX_REPROJ_ERROR = 5.0
-
-
-def filter_reprojection(cloud_ids, cloud_points,
-                        corner_ids, corner_points,
-                        intrinsic_mat, view_mat):
-    _, (cloud_idx, corner_idx) = snp.intersect(cloud_ids.flatten(), corner_ids.flatten(), indices=True)
-    proj_mat = intrinsic_mat @ view_mat
-    good_points = calc_inlier_indices(cloud_points[cloud_idx], corner_points[corner_idx], proj_mat, MAX_REPROJ_ERROR)
-    return cloud_ids[cloud_idx][good_points], cloud_points[cloud_idx][good_points]
-
-
-def triangulate(vm_1, vm_2, corners_1, corners_2, intrinsic_mat):
-    ids, (idx_1, idx_2) = snp.intersect(corners_1.ids.flatten(), corners_2.ids.flatten(), indices=True)
-
-    cloud = cv2.triangulatePoints(
-        intrinsic_mat @ vm_1,
-        intrinsic_mat @ vm_2,
-        corners_1.points[idx_1].T,
-        corners_2.points[idx_2].T,
-    ).T
-    cloud /= cloud[:, 3].reshape(-1, 1)
-    cloud = cloud[:, :3]
-
-    ids, cloud = filter_reprojection(ids, cloud, corners_1.ids, corners_1.points, intrinsic_mat, vm_1)
-    ids, cloud = filter_reprojection(ids, cloud, corners_2.ids, corners_2.points, intrinsic_mat, vm_2)
-
-    return ids, cloud
+TRIANG_PARAMS = TriangulationParameters(max_reprojection_error=MAX_REPROJ_ERROR,
+                                        min_triangulation_angle_deg=1,
+                                        min_depth=0)
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -71,27 +49,25 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
     vm_1 = pose_to_view_mat3x4(known_view_1[1])
     vm_2 = pose_to_view_mat3x4(known_view_2[1])
-    id_triangulated, cloud = triangulate(vm_1, vm_2,
-                                         corner_storage[known_view_1[0]],
-                                         corner_storage[known_view_2[0]],
-                                         intrinsic_mat)
+
+    correspondences = build_correspondences(corner_storage[known_view_1[0]], corner_storage[known_view_2[0]])
+    cloud, id_triangulated, _ = triangulate_correspondences(correspondences, vm_1, vm_2, intrinsic_mat, TRIANG_PARAMS)
     point_cloud_builder = PointCloudBuilder(id_triangulated,
                                             cloud)
 
     view_mats = []
     for frame, corners in enumerate(corner_storage):
-        ids, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
+        _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
         _, rvec, tvec, _ = cv2.solvePnPRansac(point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
                                               intrinsic_mat, None)
-        pose = Pose(cv2.Rodrigues(-rvec)[0], -cv2.Rodrigues(-rvec)[0] @ tvec)
-
-        vm = pose_to_view_mat3x4(pose)
+        vm = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
         view_mats.append(vm)
 
         if frame > 10:
             reference = max(0, frame - 10)
-            new_triang_id, new_cloud = triangulate(view_mats[reference], vm, corner_storage[reference],
-                                                   corners, intrinsic_mat)
+            correspondences = build_correspondences(corner_storage[reference], corners)
+            new_cloud, new_triang_id, _ = triangulate_correspondences(correspondences, view_mats[reference], vm,
+                                                                      intrinsic_mat, TRIANG_PARAMS)
             point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
     view_mats[known_view_1[0]] = vm_1
