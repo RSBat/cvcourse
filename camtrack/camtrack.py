@@ -22,7 +22,7 @@ from _camtrack import (
     pose_to_view_mat3x4,
     to_opencv_camera_mat3x3,
     triangulate_correspondences,
-    view_mat3x4_to_pose, rodrigues_and_translation_to_view_mat3x4,
+    view_mat3x4_to_pose, rodrigues_and_translation_to_view_mat3x4, eye3x4,
 )
 
 
@@ -32,20 +32,66 @@ TRIANG_PARAMS = TriangulationParameters(max_reprojection_error=MAX_REPROJ_ERROR,
                                         min_depth=0)
 
 
+def recover_pose(corners_1, corners_2, intrinsic_mat) -> Optional[Pose]:
+    correspondences = build_correspondences(corners_1, corners_2)
+    correspondences_count = correspondences.ids.shape[0]
+    print("Correspondences:", correspondences_count)
+    print(corners_1.ids.shape[0], corners_2.ids.shape[0])
+    # if correspondences_count < 0.8 * corners_1.ids.shape[0] or correspondences_count < 0.8 * corners_2.ids.shape[0]:
+    #     return None
+
+    E, mask = cv2.findEssentialMat(correspondences.points_1, correspondences.points_2,
+                                   intrinsic_mat, method=cv2.RANSAC)
+    essential_mat_inliers_count = np.count_nonzero(mask)
+    print("Inliers:", essential_mat_inliers_count)
+    pose_inliers, R, t, pose_mask = cv2.recoverPose(E, correspondences.points_1, correspondences.points_2,
+                                                    intrinsic_mat, mask=mask)
+    # pose_inliers, E, R, t, mask = cv2.recoverPose(correnspondences.points_1, correnspondences.points_2,
+    #                                         intrinsic_mat, None, intrinsic_mat, None, method=cv2.RANSAC)
+    # if pose_inliers < 0.8 * correspondences_count:
+    #     return None
+
+    vm_1 = eye3x4()
+    vm_2 = np.hstack([R, t])  # pose_to_view_mat3x4(Pose(R, t))
+
+    cloud, id_triangulated, avg_cos = triangulate_correspondences(correspondences, vm_1, vm_2,
+                                                                  intrinsic_mat, TRIANG_PARAMS)
+
+    print(correspondences.ids.shape, id_triangulated.shape)
+    print(avg_cos)
+    if id_triangulated.shape[0] < 100:  # id_triangulated.shape[0] < 0.8 * correspondences_count:
+        return None
+
+    return view_mat3x4_to_pose(vm_2)
+
+
+def init_views(corner_storage, intrinsic_mat):
+    for frame_1 in range(len(corner_storage) - 20):
+        frame_2 = frame_1 + 20
+        pose_2 = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
+
+        if pose_2 is not None:
+            pose_1 = view_mat3x4_to_pose(eye3x4())
+
+            known_view_1 = frame_1, pose_1
+            known_view_2 = frame_2, pose_2
+            return known_view_1, known_view_2
+
+
 def track_and_calc_colors(camera_parameters: CameraParameters,
                           corner_storage: CornerStorage,
                           frame_sequence_path: str,
                           known_view_1: Optional[Tuple[int, Pose]] = None,
                           known_view_2: Optional[Tuple[int, Pose]] = None) \
         -> Tuple[List[Pose], PointCloud]:
-    if known_view_1 is None or known_view_2 is None:
-        raise NotImplementedError()
-
     rgb_sequence = frameseq.read_rgb_f32(frame_sequence_path)
     intrinsic_mat = to_opencv_camera_mat3x3(
         camera_parameters,
         rgb_sequence[0].shape[0]
     )
+
+    if known_view_1 is None or known_view_2 is None or True:
+        known_view_1, known_view_2 = init_views(corner_storage, intrinsic_mat)
 
     vm_1 = pose_to_view_mat3x4(known_view_1[1])
     vm_2 = pose_to_view_mat3x4(known_view_2[1])
@@ -71,8 +117,8 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                                                                       intrinsic_mat, TRIANG_PARAMS)
             point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
-    view_mats[known_view_1[0]] = vm_1
-    view_mats[known_view_2[0]] = vm_2
+    # view_mats[known_view_1[0]] = vm_1
+    # view_mats[known_view_2[0]] = vm_2
 
     calc_point_cloud_colors(
         point_cloud_builder,
