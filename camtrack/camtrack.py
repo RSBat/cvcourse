@@ -22,7 +22,7 @@ from _camtrack import (
     pose_to_view_mat3x4,
     to_opencv_camera_mat3x3,
     triangulate_correspondences,
-    view_mat3x4_to_pose, rodrigues_and_translation_to_view_mat3x4, eye3x4,
+    view_mat3x4_to_pose, rodrigues_and_translation_to_view_mat3x4, eye3x4, compute_reprojection_errors,
 )
 
 
@@ -52,7 +52,8 @@ def recover_pose(corners_1, corners_2, intrinsic_mat) -> Optional[Pose]:
     #     return None
 
     vm_1 = eye3x4()
-    vm_2 = np.hstack([R, t])  # pose_to_view_mat3x4(Pose(R, t))
+    vm_2 = np.hstack([R, t])
+    # vm_2 = pose_to_view_mat3x4(Pose(R, t))
 
     cloud, id_triangulated, avg_cos = triangulate_correspondences(correspondences, vm_1, vm_2,
                                                                   intrinsic_mat, TRIANG_PARAMS)
@@ -78,6 +79,47 @@ def init_views(corner_storage, intrinsic_mat):
             return known_view_1, known_view_2
 
 
+def intersect_all(corner_storage: CornerStorage, frames: List[int]):
+    intersection_ids = corner_storage[frames[0]].ids
+    for frame in frames:
+        intersection_ids = snp.intersect(intersection_ids.flatten(), corner_storage[frame].ids.flatten())
+
+    points = []
+    for frame in frames:
+        _, (_, idx) = snp.intersect(intersection_ids.flatten(), corner_storage[frame].ids.flatten(), indices=True)
+        points.append(corner_storage[frame].points[idx])
+
+    return intersection_ids, points
+
+
+def triangulate_multiple(corner_storage: CornerStorage, vms, intrinsic_mat, frames: List[int]):
+    p3d_hom = []
+    int_ids, int_points = intersect_all(corner_storage, frames)
+    for pt_idx, _ in enumerate(int_ids):
+        print(f"\r{pt_idx}/{len(int_ids)}", end="")
+        eqs = []
+        for points, vm in zip(int_points, vms):
+            pt = points[pt_idx]
+            pm = intrinsic_mat @ vm
+            eqs.append(pt[0] * pm[2] - pm[0])
+            eqs.append(pt[1] * pm[2] - pm[1])
+
+        A = np.asarray(eqs)
+        u, s, vh = np.linalg.svd(A)
+        res = vh[-1]
+        p3d_hom.append(res)
+
+    p3d = cv2.convertPointsFromHomogeneous(np.asarray(p3d_hom)).reshape(-1, 3)
+
+    mask = np.ones_like(int_ids)
+    for points2d, vm in zip(int_points, vms):
+        reproj_errs_1 = compute_reprojection_errors(p3d, points2d,
+                                                    intrinsic_mat @ vm)
+        mask = mask & (reproj_errs_1 < 2.0)
+    print(f"Remaining: {np.count_nonzero(mask)}/{int_ids.shape[0]}")
+    return int_ids[mask], p3d[mask]
+
+
 def track_and_calc_colors(camera_parameters: CameraParameters,
                           corner_storage: CornerStorage,
                           frame_sequence_path: str,
@@ -90,7 +132,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         rgb_sequence[0].shape[0]
     )
 
-    if known_view_1 is None or known_view_2 is None or True:
+    if known_view_1 is None or known_view_2 is None:
         known_view_1, known_view_2 = init_views(corner_storage, intrinsic_mat)
 
     vm_1 = pose_to_view_mat3x4(known_view_1[1])
@@ -116,6 +158,12 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
             new_cloud, new_triang_id, _ = triangulate_correspondences(correspondences, view_mats[reference], vm,
                                                                       intrinsic_mat, TRIANG_PARAMS)
             point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
+
+        if frame >= 50:
+            vms = [view_mats[frame - 10 * x] for x in range(6)]
+            fns = [frame - 10 * x for x in range(6)]
+            aa_ids, aa_pts = triangulate_multiple(corner_storage, vms, intrinsic_mat, fns)
+            point_cloud_builder.add_points(aa_ids, aa_pts)
 
     # view_mats[known_view_1[0]] = vm_1
     # view_mats[known_view_2[0]] = vm_2
