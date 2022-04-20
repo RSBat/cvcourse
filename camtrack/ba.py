@@ -10,8 +10,7 @@ EPS = 1e-6
 lr = 1e-6
 
 
-def loss_fn(intrinsic_mat: np.ndarray,
-            list_of_corners: List[FrameCorners],
+def loss_fn(list_of_corners: List[FrameCorners],
             max_inlier_reprojection_error: float,
             proj_mats: List[np.ndarray],
             pc_builder: PointCloudBuilder) -> float:
@@ -24,7 +23,6 @@ def loss_fn(intrinsic_mat: np.ndarray,
 
 
 def loss_fn_vm(frame: int,
-               intrinsic_mat: np.ndarray,
                list_of_corners: List[FrameCorners],
                max_inlier_reprojection_error: float,
                proj_mats: List[np.ndarray],
@@ -38,7 +36,6 @@ def loss_fn_vm(frame: int,
 
 # todo: verify optimization
 def loss_fn_point(point_id,
-                  intrinsic_mat: np.ndarray,
                   list_of_corners: List[FrameCorners],
                   max_inlier_reprojection_error: float,
                   proj_mats: List[np.ndarray],
@@ -71,7 +68,6 @@ def foo(frame: int,
         og_val = view_mat[it.multi_index]
         view_mat[it.multi_index] = og_val + EPS
         res_add = loss_fn_vm(frame,
-                             intrinsic_mat,
                              list_of_corners,
                              max_inlier_reprojection_error,
                              proj_mats,
@@ -79,7 +75,6 @@ def foo(frame: int,
 
         view_mat[it.multi_index] = og_val - EPS
         res_sub = loss_fn_vm(frame,
-                             intrinsic_mat,
                              list_of_corners,
                              max_inlier_reprojection_error,
                              proj_mats,
@@ -112,7 +107,6 @@ def bar(intrinsic_mat: np.ndarray,
         pc_builder.points[it.multi_index] = og_val + EPS
         res_add = loss_fn_point(
             pc_builder.ids[it.multi_index[0]][0],
-            intrinsic_mat,
             list_of_corners,
             max_inlier_reprojection_error,
             proj_mats,
@@ -122,7 +116,6 @@ def bar(intrinsic_mat: np.ndarray,
         pc_builder.points[it.multi_index] = og_val - EPS
         res_sub = loss_fn_point(
             pc_builder.ids[it.multi_index[0]][0],
-            intrinsic_mat,
             list_of_corners,
             max_inlier_reprojection_error,
             proj_mats,
@@ -150,11 +143,13 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
 
     proj_mats = [intrinsic_mat @ view_mat for view_mat in view_mats]
 
-    initial_loss = loss_fn(intrinsic_mat, list_of_corners, max_inlier_reprojection_error, proj_mats, pc_builder)
+    initial_loss = loss_fn(list_of_corners, max_inlier_reprojection_error, proj_mats, pc_builder)
     loss_scale = 100 / initial_loss
     print(initial_loss)
 
     for _ in range(1):
+        proj_mats = [intrinsic_mat @ view_mat for view_mat in view_mats]
+
         new_view_mats = []
         for frame in range(len(view_mats)):
             print(f"\rframe: {frame}/{len(view_mats)}", end="")
@@ -181,8 +176,7 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
         pc_builder.update_points(pc_builder.ids, new_points)
 
         print("\r", end="")
-        print(loss_fn(intrinsic_mat,
-                      list_of_corners,
+        print(loss_fn(list_of_corners,
                       max_inlier_reprojection_error,
                       proj_mats,
                       pc_builder))
