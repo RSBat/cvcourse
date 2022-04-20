@@ -23,13 +23,26 @@ def loss_fn(intrinsic_mat: np.ndarray,
     return res / len(proj_mats)
 
 
+def loss_fn_vm(frame: int,
+               intrinsic_mat: np.ndarray,
+               list_of_corners: List[FrameCorners],
+               max_inlier_reprojection_error: float,
+               proj_mats: List[np.ndarray],
+               pc_builder: PointCloudBuilder) -> float:
+    corners = list_of_corners[frame]
+    proj_mat = proj_mats[frame]
+    correspondences = build_correspondences(pc_builder, corners)
+    errors = compute_reprojection_errors(correspondences.points_1, correspondences.points_2, proj_mat)
+    return errors.sum() / len(proj_mats)
+
+
 # todo: verify optimization
 def loss_fn_point(point_id,
                   intrinsic_mat: np.ndarray,
                   list_of_corners: List[FrameCorners],
                   max_inlier_reprojection_error: float,
                   proj_mats: List[np.ndarray],
-                  pc_builder: PointCloudBuilder):
+                  pc_builder: PointCloudBuilder) -> float:
     _, (_, cloud_idx) = sortednp.intersect(np.asarray([point_id]), pc_builder.ids.flatten(), indices=True)
 
     res = 0.0
@@ -57,18 +70,20 @@ def foo(frame: int,
     while True:
         og_val = view_mat[it.multi_index]
         view_mat[it.multi_index] = og_val + EPS
-        res_add = loss_fn(intrinsic_mat,
-                          list_of_corners,
-                          max_inlier_reprojection_error,
-                          proj_mats,
-                          pc_builder)
+        res_add = loss_fn_vm(frame,
+                             intrinsic_mat,
+                             list_of_corners,
+                             max_inlier_reprojection_error,
+                             proj_mats,
+                             pc_builder)
 
         view_mat[it.multi_index] = og_val - EPS
-        res_sub = loss_fn(intrinsic_mat,
-                          list_of_corners,
-                          max_inlier_reprojection_error,
-                          proj_mats,
-                          pc_builder)
+        res_sub = loss_fn_vm(frame,
+                             intrinsic_mat,
+                             list_of_corners,
+                             max_inlier_reprojection_error,
+                             proj_mats,
+                             pc_builder)
 
         view_mat[it.multi_index] = og_val
 
