@@ -113,11 +113,11 @@ def triangulate_multiple(corner_storage: CornerStorage, vms, intrinsic_mat, fram
 
     p3d = cv2.convertPointsFromHomogeneous(np.asarray(p3d_hom)).reshape(-1, 3)
 
-    mask = np.ones_like(int_ids)
+    mask = np.ones_like(int_ids).astype(bool)
     for points2d, vm in zip(int_points, vms):
         reproj_errs_1 = compute_reprojection_errors(p3d, points2d,
                                                     intrinsic_mat @ vm)
-        mask = mask & (reproj_errs_1 < 2.0)
+        mask = mask & (reproj_errs_1 < MAX_REPROJ_ERROR)
     print(f"Remaining: {np.count_nonzero(mask)}/{int_ids.shape[0]}")
     return int_ids[mask], p3d[mask]
 
@@ -161,22 +161,22 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                                                                       intrinsic_mat, TRIANG_PARAMS)
             point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
-        # if frame >= 50:
-        #     vms = [view_mats[frame - 10 * x] for x in range(6)]
-        #     fns = [frame - 10 * x for x in range(6)]
-        #     aa_ids, aa_pts = triangulate_multiple(corner_storage, vms, intrinsic_mat, fns)
-        #     point_cloud_builder.add_points(aa_ids, aa_pts)
+        if frame >= 50:
+            vms = [view_mats[frame - 10 * x] for x in range(6)]
+            fns = [frame - 10 * x for x in range(6)]
+            aa_ids, aa_pts = triangulate_multiple(corner_storage, vms, intrinsic_mat, fns)
+            point_cloud_builder.add_points(aa_ids, aa_pts)
 
     # view_mats[known_view_1[0]] = vm_1
     # view_mats[known_view_2[0]] = vm_2
 
-    run_bundle_adjustment(
-        intrinsic_mat,
-        corner_storage,
-        MAX_REPROJ_ERROR,
-        view_mats,
-        point_cloud_builder,
-    )
+    # run_bundle_adjustment(
+    #     intrinsic_mat,
+    #     corner_storage,
+    #     MAX_REPROJ_ERROR,
+    #     view_mats,
+    #     point_cloud_builder,
+    # )
 
     calc_point_cloud_colors(
         point_cloud_builder,
