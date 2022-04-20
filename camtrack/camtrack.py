@@ -150,7 +150,8 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         print(f"\rProcessing frame {frame + 1}/{len(corner_storage)}")
         _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
         _, rvec, tvec, _ = cv2.solvePnPRansac(point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
-                                              intrinsic_mat, None)
+                                              intrinsic_mat, None,
+                                              iterationsCount=10_000, reprojectionError=MAX_REPROJ_ERROR)
         vm = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
         view_mats.append(vm)
 
