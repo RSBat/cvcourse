@@ -13,15 +13,14 @@ lr = 1e-6
 def loss_fn(intrinsic_mat: np.ndarray,
             list_of_corners: List[FrameCorners],
             max_inlier_reprojection_error: float,
-            view_mats: List[np.ndarray],
+            proj_mats: List[np.ndarray],
             pc_builder: PointCloudBuilder) -> float:
     res = 0.0
-    for corners, view_mat in zip(list_of_corners, view_mats):
+    for corners, proj_mat in zip(list_of_corners, proj_mats):
         correspondences = build_correspondences(pc_builder, corners)
-        proj_mat = intrinsic_mat @ view_mat
         errors = compute_reprojection_errors(correspondences.points_1, correspondences.points_2, proj_mat)
         res += errors.sum()
-    return res / len(view_mats)
+    return res / len(proj_mats)
 
 
 # todo: verify optimization
@@ -29,20 +28,19 @@ def loss_fn_point(point_id,
                   intrinsic_mat: np.ndarray,
                   list_of_corners: List[FrameCorners],
                   max_inlier_reprojection_error: float,
-                  view_mats: List[np.ndarray],
+                  proj_mats: List[np.ndarray],
                   pc_builder: PointCloudBuilder):
     _, (_, cloud_idx) = sortednp.intersect(np.asarray([point_id]), pc_builder.ids.flatten(), indices=True)
 
     res = 0.0
-    for corners, view_mat in zip(list_of_corners, view_mats):
+    for corners, proj_mat in zip(list_of_corners, proj_mats):
         if not sortednp.isitem(point_id, corners.ids.flatten()):
             continue
         _, (_, corners_idx) = sortednp.intersect(np.asarray([point_id]), corners.ids.flatten(), indices=True)
 
-        proj_mat = intrinsic_mat @ view_mat
         errors = compute_reprojection_errors(pc_builder.points[cloud_idx], corners.points[corners_idx], proj_mat)
         res += errors.sum()
-    return res / len(view_mats)
+    return res / len(proj_mats)
 
 
 def foo(frame: int,
@@ -51,7 +49,8 @@ def foo(frame: int,
         max_inlier_reprojection_error: float,
         view_mats: List[np.ndarray],
         pc_builder: PointCloudBuilder,
-        loss_scale: float) -> np.ndarray:
+        loss_scale: float,
+        proj_mats: List[np.ndarray]) -> np.ndarray:
     view_mat = view_mats[frame]
     new_view_mat = view_mat.copy()
     it = np.nditer(view_mat, flags=['multi_index'])
@@ -61,14 +60,14 @@ def foo(frame: int,
         res_add = loss_fn(intrinsic_mat,
                           list_of_corners,
                           max_inlier_reprojection_error,
-                          view_mats,
+                          proj_mats,
                           pc_builder)
 
         view_mat[it.multi_index] = og_val - EPS
         res_sub = loss_fn(intrinsic_mat,
                           list_of_corners,
                           max_inlier_reprojection_error,
-                          view_mats,
+                          proj_mats,
                           pc_builder)
 
         view_mat[it.multi_index] = og_val
@@ -87,7 +86,8 @@ def bar(intrinsic_mat: np.ndarray,
         max_inlier_reprojection_error: float,
         view_mats: List[np.ndarray],
         pc_builder: PointCloudBuilder,
-        loss_scale: float) -> np.ndarray:
+        loss_scale: float,
+        proj_mats: List[np.ndarray]) -> np.ndarray:
     new_points = pc_builder.points.copy()
     it = np.nditer(pc_builder.points, flags=['multi_index'])
     while True:
@@ -100,7 +100,7 @@ def bar(intrinsic_mat: np.ndarray,
             intrinsic_mat,
             list_of_corners,
             max_inlier_reprojection_error,
-            view_mats,
+            proj_mats,
             pc_builder
         )
 
@@ -110,7 +110,7 @@ def bar(intrinsic_mat: np.ndarray,
             intrinsic_mat,
             list_of_corners,
             max_inlier_reprojection_error,
-            view_mats,
+            proj_mats,
             pc_builder
         )
 
@@ -133,7 +133,9 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
     # TODO: implement
     # You may modify pc_builder using 'update_points' method
 
-    initial_loss = loss_fn(intrinsic_mat, list_of_corners, max_inlier_reprojection_error, view_mats, pc_builder)
+    proj_mats = [intrinsic_mat @ view_mat for view_mat in view_mats]
+
+    initial_loss = loss_fn(intrinsic_mat, list_of_corners, max_inlier_reprojection_error, proj_mats, pc_builder)
     loss_scale = 100 / initial_loss
     print(initial_loss)
 
@@ -147,7 +149,8 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
                                max_inlier_reprojection_error,
                                view_mats,
                                pc_builder,
-                               loss_scale)
+                               loss_scale,
+                               proj_mats)
             new_view_mats.append(new_view_mat)
 
         print("\rpoints", end="")
@@ -156,7 +159,8 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
                          max_inlier_reprojection_error,
                          view_mats,
                          pc_builder,
-                         loss_scale)
+                         loss_scale,
+                         proj_mats)
 
         view_mats = new_view_mats
         pc_builder.update_points(pc_builder.ids, new_points)
@@ -165,7 +169,7 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
         print(loss_fn(intrinsic_mat,
                       list_of_corners,
                       max_inlier_reprojection_error,
-                      view_mats,
+                      proj_mats,
                       pc_builder))
 
     return view_mats
