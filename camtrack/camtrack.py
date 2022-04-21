@@ -171,13 +171,13 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     # view_mats[known_view_1[0]] = vm_1
     # view_mats[known_view_2[0]] = vm_2
 
-    # run_bundle_adjustment(
-    #     intrinsic_mat,
-    #     corner_storage,
-    #     MAX_REPROJ_ERROR,
-    #     view_mats,
-    #     point_cloud_builder,
-    # )
+    run_bundle_adjustment(
+        intrinsic_mat,
+        corner_storage,
+        MAX_REPROJ_ERROR,
+        view_mats,
+        point_cloud_builder,
+    )
 
     calc_point_cloud_colors(
         point_cloud_builder,

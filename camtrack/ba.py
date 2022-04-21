@@ -1,8 +1,14 @@
+import time
 from typing import List
 
+import jax
 import numpy as np
+import jax.numpy as jnp
+import optax
 import sortednp
+import sortednp as snp
 
+from _camtrack import Correspondences
 from corners import FrameCorners
 from _camtrack import PointCloudBuilder, compute_reprojection_errors, build_correspondences
 
@@ -91,6 +97,36 @@ def foo(frame: int,
     return new_view_mat
 
 
+def create_loss_fn_jax(intrinsic_mat: np.ndarray,
+                       list_of_corners: List[FrameCorners],
+                       max_inlier_reprojection_error: float,
+                       # proj_mats: np.ndarray,
+                       ids: np.ndarray):
+    def f(points, view_mats):
+        res = 0.0
+        for frame, corners in enumerate(list_of_corners):
+            proj_mat = jnp.dot(intrinsic_mat, view_mats[frame])
+            ids_1 = ids.flatten()
+            ids_2 = corners.ids.flatten()
+            _, (indices_1, indices_2) = snp.intersect(ids_1, ids_2, indices=True)
+            correspondences = Correspondences(
+                ids_1[indices_1],
+                points[indices_1],
+                corners.points[indices_2]
+            )
+
+            points3d = jnp.pad(correspondences.points_1, ((0, 0), (0, 1)), 'constant', constant_values=(1,))
+            points2d = jnp.dot(proj_mat, points3d.T)
+            points2d /= points2d[jnp.array([2])]
+            projected_points = points2d[:2].T
+
+            points2d_diff = correspondences.points_2 - projected_points
+            errors = jnp.linalg.norm(points2d_diff, axis=1)
+            res += errors.sum()
+        return res / len(list_of_corners)
+    return f
+
+
 def bar(intrinsic_mat: np.ndarray,
         list_of_corners: List[FrameCorners],
         max_inlier_reprojection_error: float,
@@ -98,10 +134,11 @@ def bar(intrinsic_mat: np.ndarray,
         pc_builder: PointCloudBuilder,
         loss_scale: float,
         proj_mats: List[np.ndarray]) -> np.ndarray:
+    diff_st = time.time()
     new_points = pc_builder.points.copy()
     it = np.nditer(pc_builder.points, flags=['multi_index'])
     while True:
-        print(f"\r{it.multi_index}/{pc_builder.points.shape}", end="")
+        # print(f"\r{it.multi_index}/{pc_builder.points.shape}", end="")
 
         og_val = pc_builder.points[it.multi_index]
         pc_builder.points[it.multi_index] = og_val + EPS
@@ -112,6 +149,12 @@ def bar(intrinsic_mat: np.ndarray,
             proj_mats,
             pc_builder
         )
+        # res_add = loss_fn(
+        #     list_of_corners,
+        #     max_inlier_reprojection_error,
+        #     proj_mats,
+        #     pc_builder
+        # )
 
         pc_builder.points[it.multi_index] = og_val - EPS
         res_sub = loss_fn_point(
@@ -121,15 +164,24 @@ def bar(intrinsic_mat: np.ndarray,
             proj_mats,
             pc_builder
         )
+        # res_sub = loss_fn(
+        #     list_of_corners,
+        #     max_inlier_reprojection_error,
+        #     proj_mats,
+        #     pc_builder
+        # )
 
         pc_builder.points[it.multi_index] = og_val
 
         grad = loss_scale * (res_add - res_sub) / (2 * EPS)
-        # print("pt", og_val, grad)
+        # print("pt", og_val, grad, loss_scale * jax_grad[it.multi_index])
         new_points[it.multi_index] = og_val - lr * grad
 
         if not it.iternext():
             break
+    diff_end = time.time()
+    # print("Jax", jax_end - jax_st)
+    # print("Diff", diff_end - diff_st)
     return new_points
 
 
@@ -147,7 +199,26 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
     loss_scale = 100 / initial_loss
     print(initial_loss)
 
+    jax_pre_st = time.time()
+    jpt = jnp.copy(pc_builder.points)
+    jvm = jnp.asarray(view_mats)
+
+    loss_fn_jax = create_loss_fn_jax(intrinsic_mat, list_of_corners, max_inlier_reprojection_error,
+                                     pc_builder.ids)
+    loss_fn_grad = jax.grad(loss_fn_jax, argnums=(0, 1))
+    jax_pre_end = time.time()
+    print("Jax pre", jax_pre_end - jax_pre_st)
+
     for _ in range(1):
+        jax_st = time.time()
+        for jax_step in range(10):
+            jpt_grad, jvm_grad = loss_fn_grad(jpt, jvm)
+            jpt = jpt - lr * loss_scale * jpt_grad
+            jvm = jvm - lr * loss_scale * jvm_grad
+        jax_end = time.time()
+        print("Jax final loss: ", loss_fn_jax(jpt, jvm))
+
+        reg_st = time.time()
         proj_mats = [intrinsic_mat @ view_mat for view_mat in view_mats]
 
         new_view_mats = []
@@ -180,5 +251,8 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
                       max_inlier_reprojection_error,
                       proj_mats,
                       pc_builder))
+        reg_end = time.time()
+        print("Jax", jax_end - jax_st)
+        print("Regq", reg_end - reg_st)
 
     return view_mats
