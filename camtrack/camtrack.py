@@ -93,33 +93,43 @@ def intersect_all(corner_storage: CornerStorage, frames: List[int]):
     return intersection_ids, points
 
 
-def triangulate_multiple(corner_storage: CornerStorage, vms, intrinsic_mat, frames: List[int]):
-    p3d_hom = []
+def triangulate_multiple_frames(projections: List[np.ndarray], proj_mats: List[np.ndarray]) -> np.ndarray:
+    """
+    Triangulate using DLT
+    :returns: triangulated point in homogeneous coordinates
+    """
+    eqs = []
+    for projection, proj_mat in zip(projections, proj_mats):
+        eqs.append(projection[0] * proj_mat[2] - proj_mat[0])
+        eqs.append(projection[1] * proj_mat[2] - proj_mat[1])
+
+    A = np.asarray(eqs)
+    u, s, vh = np.linalg.svd(A)
+    point3d_hom = vh[-1]
+    return point3d_hom
+
+
+def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarray],
+                         intrinsic_mat, frames: List[int]):
+    proj_mats = [intrinsic_mat @ view_mat for view_mat in view_mats]
+
+    points3d_hom = []
     int_ids, int_points = intersect_all(corner_storage, frames)
     for pt_idx, _ in enumerate(int_ids):
         print(f"\r{pt_idx}/{len(int_ids)}", end="")
-        eqs = []
-        for points, vm in zip(int_points, vms):
-            pt = points[pt_idx]
-            pm = intrinsic_mat @ vm
-            eqs.append(pt[0] * pm[2] - pm[0])
-            eqs.append(pt[1] * pm[2] - pm[1])
-
-        A = np.asarray(eqs)
-        u, s, vh = np.linalg.svd(A)
-        res = vh[-1]
-        p3d_hom.append(res)
+        projections = [points2d[pt_idx] for points2d in int_points]
+        point3d_hom = triangulate_multiple_frames(projections, proj_mats)
+        points3d_hom.append(point3d_hom)
     print("\r", end="")
 
-    p3d = cv2.convertPointsFromHomogeneous(np.asarray(p3d_hom)).reshape(-1, 3)
+    points3d = cv2.convertPointsFromHomogeneous(np.asarray(points3d_hom)).reshape(-1, 3)
 
     mask = np.ones_like(int_ids).astype(bool)
-    for points2d, vm in zip(int_points, vms):
-        reproj_errs_1 = compute_reprojection_errors(p3d, points2d,
-                                                    intrinsic_mat @ vm)
-        mask = mask & (reproj_errs_1 < MAX_REPROJ_ERROR)
+    for points2d, proj_mat in zip(int_points, proj_mats):
+        reproj_errs = compute_reprojection_errors(points3d, points2d, proj_mat)
+        mask = mask & (reproj_errs < MAX_REPROJ_ERROR)
     print(f"Remaining: {np.count_nonzero(mask)}/{int_ids.shape[0]}")
-    return int_ids[mask], p3d[mask]
+    return int_ids[mask], points3d[mask]
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -175,7 +185,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     if point_cloud_builder.points.shape[0] < 5000:
         run_bundle_adjustment(
             intrinsic_mat,
-            corner_storage,
+            corner_storage,  # noqa: type
             MAX_REPROJ_ERROR,
             view_mats,
             point_cloud_builder,
