@@ -111,10 +111,10 @@ def triangulate_multiple_frames(projections: List[np.ndarray], proj_mats: List[n
 
 def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarray],
                          intrinsic_mat, frames: List[int]):
-    proj_mats = [intrinsic_mat @ view_mat for view_mat in view_mats]
+    proj_mats = [intrinsic_mat @ view_mats[frame] for frame in frames]
+    int_ids, int_points = intersect_all(corner_storage, frames)
 
     points3d_hom = []
-    int_ids, int_points = intersect_all(corner_storage, frames)
     for pt_idx, _ in enumerate(int_ids):
         print(f"\r{pt_idx}/{len(int_ids)}", end="")
         projections = [points2d[pt_idx] for points2d in int_points]
@@ -173,9 +173,8 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
             point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
         if frame >= 50:
-            vms = [view_mats[frame - 10 * x] for x in range(6)]
-            fns = [frame - 10 * x for x in range(6)]
-            aa_ids, aa_pts = triangulate_multiple(corner_storage, vms, intrinsic_mat, fns)
+            frames = [frame - 10 * x for x in range(6)]
+            aa_ids, aa_pts = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, frames)
             point_cloud_builder.add_points(aa_ids, aa_pts)
 
     # view_mats[known_view_1[0]] = vm_1
