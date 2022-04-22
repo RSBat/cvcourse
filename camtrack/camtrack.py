@@ -4,6 +4,7 @@ __all__ = [
     'track_and_calc_colors'
 ]
 
+import random
 from typing import List, Optional, Tuple
 
 import cv2
@@ -109,27 +110,84 @@ def triangulate_multiple_frames(projections: List[np.ndarray], proj_mats: List[n
     return point3d_hom
 
 
+def proj_hom(points3d_hom, proj_mat):
+    points2d = np.dot(proj_mat, points3d_hom.T)
+    points2d /= points2d[[2]]
+    return points2d[:2].T
+
+
+def find_inliers(pt, frames):
+    inliers = []
+    for projection, proj_mat in frames:
+        point2d = proj_hom(pt, proj_mat)
+        points2d_diff = projection - point2d
+        error = np.linalg.norm(points2d_diff, axis=1)
+        if error < MAX_REPROJ_ERROR:
+            inliers.append((projection, proj_mat))
+    return inliers
+
+
+def triangulate_multiple_frames_ransac(projections: List[np.ndarray], proj_mats: List[np.ndarray]) -> np.ndarray:
+    rnd = random.Random(x=42)
+
+    best_point3d_hom = None
+    best_inliers_count = 0
+    frames = list(zip(projections, proj_mats))
+    for _ in range(10):
+        if best_inliers_count == len(frames):
+            return best_point3d_hom
+
+        n = rnd.randrange(2, len(frames))
+        base = rnd.choices(frames, k=n)
+        base_projections, base_proj_mats = zip(*base)
+
+        pt = triangulate_multiple_frames(base_projections, base_proj_mats).reshape(-1, 4)
+        inliers = find_inliers(pt, frames)
+
+        if 2 * len(inliers) >= len(frames):
+            inliers_projections, inliers_proj_mats = zip(*inliers)
+            final_point3d_hom = triangulate_multiple_frames(inliers_projections, inliers_proj_mats).reshape(-1, 4)
+            final_inliers = find_inliers(final_point3d_hom, frames)
+
+            if best_point3d_hom is None or len(final_inliers) > best_inliers_count:
+                best_point3d_hom = final_point3d_hom
+                best_inliers_count = len(final_inliers)
+        # else:
+        #     print("Failed RANSAC iter")
+
+    # if best_point3d_hom is None:
+    #     print("Failed RANSAC")
+    # else:
+    #     print(best_inliers_count, len(frames))
+    return best_point3d_hom
+
+
 def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarray],
                          intrinsic_mat, frames: List[int]):
     proj_mats = [intrinsic_mat @ view_mats[frame] for frame in frames]
     int_ids, int_points = intersect_all(corner_storage, frames)
 
     points3d_hom = []
-    for pt_idx, _ in enumerate(int_ids):
+    triangulated_ids = []
+    for pt_idx, pt_id in enumerate(int_ids):
         print(f"\r{pt_idx}/{len(int_ids)}", end="")
         projections = [points2d[pt_idx] for points2d in int_points]
-        point3d_hom = triangulate_multiple_frames(projections, proj_mats)
-        points3d_hom.append(point3d_hom)
+        point3d_hom = triangulate_multiple_frames_ransac(projections, proj_mats)
+        if point3d_hom is not None:
+            points3d_hom.append(point3d_hom)
+            triangulated_ids.append(pt_id)
     print("\r", end="")
 
     points3d = cv2.convertPointsFromHomogeneous(np.asarray(points3d_hom)).reshape(-1, 3)
 
-    mask = np.ones_like(int_ids).astype(bool)
-    for points2d, proj_mat in zip(int_points, proj_mats):
-        reproj_errs = compute_reprojection_errors(points3d, points2d, proj_mat)
-        mask = mask & (reproj_errs < MAX_REPROJ_ERROR)
-    print(f"Remaining: {np.count_nonzero(mask)}/{int_ids.shape[0]}")
-    return int_ids[mask], points3d[mask]
+    # mask = np.ones_like(int_ids).astype(bool)
+    # for points2d, proj_mat in zip(int_points, proj_mats):
+    #     reproj_errs = compute_reprojection_errors(points3d, points2d, proj_mat)
+    #     mask = mask & (reproj_errs < MAX_REPROJ_ERROR)
+    # print(f"Remaining: {np.count_nonzero(mask)}/{int_ids.shape[0]}")
+    # return int_ids[mask], points3d[mask]
+
+    return np.asarray(triangulated_ids), points3d
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -172,7 +230,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                                                                       intrinsic_mat, TRIANG_PARAMS)
             point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
-        if frame >= 50:
+        if frame >= 50 and frame % 5 == 0:
             frames = [frame - 10 * x for x in range(6)]
             aa_ids, aa_pts = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, frames)
             point_cloud_builder.add_points(aa_ids, aa_pts)
@@ -181,14 +239,14 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     # view_mats[known_view_2[0]] = vm_2
 
     # run bundle adjustment only if we don't have too many points
-    if point_cloud_builder.points.shape[0] < 5000:
-        run_bundle_adjustment(
-            intrinsic_mat,
-            corner_storage,  # noqa: type
-            MAX_REPROJ_ERROR,
-            view_mats,
-            point_cloud_builder,
-        )
+    # if point_cloud_builder.points.shape[0] < 5000:
+    #     run_bundle_adjustment(
+    #         intrinsic_mat,
+    #         corner_storage,  # noqa: type
+    #         MAX_REPROJ_ERROR,
+    #         view_mats,
+    #         point_cloud_builder,
+    #     )
 
     calc_point_cloud_colors(
         point_cloud_builder,
