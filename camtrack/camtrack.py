@@ -235,12 +235,12 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         vm = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
         view_mats.append(vm)
 
-        if frame > 10:
-            reference = max(0, frame - 10)
-            correspondences = build_correspondences(corner_storage[reference], corners)
-            new_cloud, new_triang_id, _ = triangulate_correspondences(correspondences, view_mats[reference], vm,
-                                                                      intrinsic_mat, TRIANG_PARAMS)
-            point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
+        # if frame > 10:
+        #     reference = max(0, frame - 10)
+        #     correspondences = build_correspondences(corner_storage[reference], corners)
+        #     new_cloud, new_triang_id, _ = triangulate_correspondences(correspondences, view_mats[reference], vm,
+        #                                                               intrinsic_mat, TRIANG_PARAMS)
+        #     point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
         if frame >= 50 and frame % 5 == 0:
             frames = [frame - 10 * x for x in range(6)]
