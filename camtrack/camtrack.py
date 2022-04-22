@@ -243,7 +243,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
             point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
         if frame >= 50 and frame % 5 == 0:
-            frames = [frame - 10 * x for x in range(6)]
+            frames = [frame - 5 * x for x in range(11)]
             aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, frames)
             point_cloud_builder.add_points(aa_ids, aa_pts)
             point_cloud_builder.delete_points(failed_ids)
