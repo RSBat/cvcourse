@@ -24,11 +24,15 @@ from _camtrack import (
     pose_to_view_mat3x4,
     to_opencv_camera_mat3x3,
     triangulate_correspondences,
-    view_mat3x4_to_pose, rodrigues_and_translation_to_view_mat3x4, eye3x4, compute_reprojection_errors,
+    view_mat3x4_to_pose, rodrigues_and_translation_to_view_mat3x4, eye3x4,
 )
 
 
 MAX_REPROJ_ERROR = 5.0
+INITIAL_TRIANG_PARAMS = TriangulationParameters(max_reprojection_error=MAX_REPROJ_ERROR,
+                                                min_triangulation_angle_deg=2,
+                                                min_depth=0)
+
 TRIANG_PARAMS = TriangulationParameters(max_reprojection_error=MAX_REPROJ_ERROR,
                                         min_triangulation_angle_deg=1,
                                         min_depth=0)
@@ -36,50 +40,35 @@ TRIANG_PARAMS = TriangulationParameters(max_reprojection_error=MAX_REPROJ_ERROR,
 
 def recover_pose(corners_1, corners_2, intrinsic_mat) -> Optional[Pose]:
     correspondences = build_correspondences(corners_1, corners_2)
-    correspondences_count = correspondences.ids.shape[0]
-    print("Correspondences:", correspondences_count)
-    print(corners_1.ids.shape[0], corners_2.ids.shape[0])
-    # if correspondences_count < 0.8 * corners_1.ids.shape[0] or correspondences_count < 0.8 * corners_2.ids.shape[0]:
-    #     return None
-
     E, mask = cv2.findEssentialMat(correspondences.points_1, correspondences.points_2,
                                    intrinsic_mat, method=cv2.RANSAC)
-    essential_mat_inliers_count = np.count_nonzero(mask)
-    print("Inliers:", essential_mat_inliers_count)
     pose_inliers, R, t, pose_mask = cv2.recoverPose(E, correspondences.points_1, correspondences.points_2,
                                                     intrinsic_mat, mask=mask)
-    # pose_inliers, E, R, t, mask = cv2.recoverPose(correnspondences.points_1, correnspondences.points_2,
-    #                                         intrinsic_mat, None, intrinsic_mat, None, method=cv2.RANSAC)
-    # if pose_inliers < 0.8 * correspondences_count:
-    #     return None
 
     vm_1 = eye3x4()
     vm_2 = np.hstack([R, t])
-    # vm_2 = pose_to_view_mat3x4(Pose(R, t))
 
     cloud, id_triangulated, avg_cos = triangulate_correspondences(correspondences, vm_1, vm_2,
-                                                                  intrinsic_mat, TRIANG_PARAMS)
-
-    print(correspondences.ids.shape, id_triangulated.shape)
-    print(avg_cos)
-    if id_triangulated.shape[0] < 100:  # id_triangulated.shape[0] < 0.8 * correspondences_count:
-        return None
-
-    return view_mat3x4_to_pose(vm_2)
+                                                                  intrinsic_mat, INITIAL_TRIANG_PARAMS)
+    return view_mat3x4_to_pose(vm_2), id_triangulated.shape[0]
 
 
 def init_views(corner_storage, intrinsic_mat):
+    best_result = None
+    max_triangulated_points = 0
     for offset in [50, 30, 20]:
         for frame_1 in range(len(corner_storage) - offset):
             frame_2 = frame_1 + offset
-            pose_2 = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
+            pose_2, triangulated_points = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
 
-            if pose_2 is not None:
+            if best_result is None or triangulated_points > max_triangulated_points:
                 pose_1 = view_mat3x4_to_pose(eye3x4())
-
                 known_view_1 = frame_1, pose_1
                 known_view_2 = frame_2, pose_2
-                return known_view_1, known_view_2
+
+                best_result = known_view_1, known_view_2
+                max_triangulated_points = triangulated_points
+    return best_result
 
 
 def intersect_all(corner_storage: CornerStorage, frames: List[int]):
