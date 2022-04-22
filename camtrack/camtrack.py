@@ -120,19 +120,18 @@ def proj_hom(points3d_hom, proj_mat):
 def find_inliers(pt, frames):
     inliers = []
 
-    # proj_mats = np.asarray([proj_mat for _, proj_mat in frames])
-    # projections = np.asarray([projection for projection, _ in frames]);
+    proj_mats = np.asarray([proj_mat for _, proj_mat in frames])
+    projections = np.asarray([projection for projection, _ in frames]);
+    points2d_hom = (proj_mats @ pt.T).reshape(-1, 3)
+    points2d = (points2d_hom / points2d_hom[:, 2].reshape(-1, 1))[:, :2]
     # points2d = proj_hom(pt, proj_mats)
-    # points2d_diff = projections - points2d
-    # errors = np.linalg.norm(points2d_diff, axis=1)
-    # mask = errors < MAX_REPROJ_ERROR
+    points2d_diff = projections - points2d
+    errors = np.linalg.norm(points2d_diff, axis=1)
+    mask = errors < MAX_REPROJ_ERROR
 
-    for projection, proj_mat in frames:
-        point2d = proj_hom(pt, proj_mat)
-        points2d_diff = projection - point2d
-        error = np.linalg.norm(points2d_diff, axis=1)
-        if error < MAX_REPROJ_ERROR:
-            inliers.append((projection, proj_mat))
+    for good, frame in zip(mask, frames):
+        if good:
+            inliers.append(frame)
     return inliers
 
 
