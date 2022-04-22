@@ -190,6 +190,10 @@ def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarr
         if len(projections) < 5:
             continue
 
+        while len(projections) > 20:
+            projections = projections[::2]
+            selected_proj_mats = selected_proj_mats[::2]
+
         point3d_hom = triangulate_multiple_frames_ransac(projections, selected_proj_mats)
         if point3d_hom is not None:
             points3d_hom.append(point3d_hom)
