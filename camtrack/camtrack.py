@@ -69,16 +69,17 @@ def recover_pose(corners_1, corners_2, intrinsic_mat) -> Optional[Pose]:
 
 
 def init_views(corner_storage, intrinsic_mat):
-    for frame_1 in range(len(corner_storage) - 20):
-        frame_2 = frame_1 + 20
-        pose_2 = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
+    for offset in [50, 30, 20]:
+        for frame_1 in range(len(corner_storage) - offset):
+            frame_2 = frame_1 + offset
+            pose_2 = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
 
-        if pose_2 is not None:
-            pose_1 = view_mat3x4_to_pose(eye3x4())
+            if pose_2 is not None:
+                pose_1 = view_mat3x4_to_pose(eye3x4())
 
-            known_view_1 = frame_1, pose_1
-            known_view_2 = frame_2, pose_2
-            return known_view_1, known_view_2
+                known_view_1 = frame_1, pose_1
+                known_view_2 = frame_2, pose_2
+                return known_view_1, known_view_2
 
 
 def intersect_all(corner_storage: CornerStorage, frames: List[int]):
