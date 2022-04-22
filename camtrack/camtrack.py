@@ -172,26 +172,26 @@ def triangulate_multiple_frames_ransac(projections: List[np.ndarray], proj_mats:
 
 
 def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarray],
-                         intrinsic_mat, frames: List[int]):
-    max_id = corner_storage.max_corner_id()
+                         intrinsic_mat, ids: np.ndarray):
+    proj_mats = [intrinsic_mat @ view_mat for view_mat in view_mats]
+
     points3d_hom = []
     triangulated_ids = []
     failed_ids = []
-    for pt_id in range(max_id + 1):
-        id_arr = np.asarray([pt_id], dtype=int)
+    for pt_id in ids:
         projections = []
-        proj_mats = []
-        for corners, view_mat in zip(corner_storage[::5], view_mats[::5]):
-            if not snp.issubset(id_arr, corners.ids.flatten()):
+        selected_proj_mats = []
+        for corners, proj_mat in zip(corner_storage[::5], proj_mats[::5]):
+            if not snp.issubset(pt_id, corners.ids.flatten()):
                 continue
-            _, (idx, _) = snp.intersect(corners.ids.flatten(), id_arr, indices=True)
+            _, (idx, _) = snp.intersect(corners.ids.flatten(), pt_id, indices=True)
             projections.append(corners.points[idx][0])
-            proj_mats.append(intrinsic_mat @ view_mat)
+            selected_proj_mats.append(proj_mat)
 
         if len(projections) < 5:
             continue
 
-        point3d_hom = triangulate_multiple_frames_ransac(projections, proj_mats)
+        point3d_hom = triangulate_multiple_frames_ransac(projections, selected_proj_mats)
         if point3d_hom is not None:
             points3d_hom.append(point3d_hom)
             triangulated_ids.append(pt_id)
@@ -200,35 +200,6 @@ def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarr
 
     points3d = cv2.convertPointsFromHomogeneous(np.asarray(points3d_hom)).reshape(-1, 3)
     return np.asarray(triangulated_ids), points3d, np.asarray(failed_ids, dtype=int)
-
-
-    # proj_mats = [intrinsic_mat @ view_mats[frame] for frame in frames]
-    # int_ids, int_points = intersect_all(corner_storage, frames)
-    #
-    # points3d_hom = []
-    # triangulated_ids = []
-    # failed_ids = []
-    # for pt_idx, pt_id in enumerate(int_ids):
-    #     print(f"\r{pt_idx}/{len(int_ids)}", end="")
-    #     projections = [points2d[pt_idx] for points2d in int_points]
-    #     point3d_hom = triangulate_multiple_frames_ransac(projections, proj_mats)
-    #     if point3d_hom is not None:
-    #         points3d_hom.append(point3d_hom)
-    #         triangulated_ids.append(pt_id)
-    #     else:
-    #         failed_ids.append(pt_id)
-    # print("\r", end="")
-    #
-    # points3d = cv2.convertPointsFromHomogeneous(np.asarray(points3d_hom)).reshape(-1, 3)
-
-    # mask = np.ones_like(int_ids).astype(bool)
-    # for points2d, proj_mat in zip(int_points, proj_mats):
-    #     reproj_errs = compute_reprojection_errors(points3d, points2d, proj_mat)
-    #     mask = mask & (reproj_errs < MAX_REPROJ_ERROR)
-    # print(f"Remaining: {np.count_nonzero(mask)}/{int_ids.shape[0]}")
-    # return int_ids[mask], points3d[mask]
-
-    # return np.asarray(triangulated_ids), points3d, np.asarray(failed_ids, dtype=int)
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -272,8 +243,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         #     point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
         if frame >= 25 and frame % 5 == 0:
-            frames = [frame - 10 * x for x in range(6)]
-            aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, frames)
+            aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, corners.ids)
             point_cloud_builder.add_points(aa_ids, aa_pts)
             point_cloud_builder.delete_points(failed_ids)
 
