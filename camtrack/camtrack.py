@@ -119,6 +119,14 @@ def proj_hom(points3d_hom, proj_mat):
 
 def find_inliers(pt, frames):
     inliers = []
+
+    # proj_mats = np.asarray([proj_mat for _, proj_mat in frames])
+    # projections = np.asarray([projection for projection, _ in frames]);
+    # points2d = proj_hom(pt, proj_mats)
+    # points2d_diff = projections - points2d
+    # errors = np.linalg.norm(points2d_diff, axis=1)
+    # mask = errors < MAX_REPROJ_ERROR
+
     for projection, proj_mat in frames:
         point2d = proj_hom(pt, proj_mat)
         points2d_diff = projection - point2d
@@ -170,6 +178,7 @@ def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarr
 
     points3d_hom = []
     triangulated_ids = []
+    failed_ids = []
     for pt_idx, pt_id in enumerate(int_ids):
         print(f"\r{pt_idx}/{len(int_ids)}", end="")
         projections = [points2d[pt_idx] for points2d in int_points]
@@ -177,6 +186,8 @@ def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarr
         if point3d_hom is not None:
             points3d_hom.append(point3d_hom)
             triangulated_ids.append(pt_id)
+        else:
+            failed_ids.append(pt_id)
     print("\r", end="")
 
     points3d = cv2.convertPointsFromHomogeneous(np.asarray(points3d_hom)).reshape(-1, 3)
@@ -188,7 +199,7 @@ def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarr
     # print(f"Remaining: {np.count_nonzero(mask)}/{int_ids.shape[0]}")
     # return int_ids[mask], points3d[mask]
 
-    return np.asarray(triangulated_ids), points3d
+    return np.asarray(triangulated_ids), points3d, np.asarray(failed_ids, dtype=int)
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -233,8 +244,9 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
         if frame >= 50 and frame % 5 == 0:
             frames = [frame - 10 * x for x in range(6)]
-            aa_ids, aa_pts = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, frames)
+            aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, frames)
             point_cloud_builder.add_points(aa_ids, aa_pts)
+            point_cloud_builder.delete_points(failed_ids)
 
     # view_mats[known_view_1[0]] = vm_1
     # view_mats[known_view_2[0]] = vm_2
