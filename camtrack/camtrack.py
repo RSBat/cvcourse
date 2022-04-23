@@ -152,21 +152,20 @@ def triangulate_multiple_frames_ransac(projections: List[np.ndarray], proj_mats:
         pt = triangulate_multiple_frames(base_projections, base_proj_mats).reshape(-1, 4)
         inliers = find_inliers(pt, frames)
 
-        if 2 * len(inliers) >= len(frames):
-            inliers_projections, inliers_proj_mats = zip(*inliers)
-            final_point3d_hom = triangulate_multiple_frames(inliers_projections, inliers_proj_mats).reshape(-1, 4)
-            final_inliers = find_inliers(final_point3d_hom, frames)
+        successful = 2 * len(inliers) >= len(frames)
+        if successful and (best_point3d_hom is None or len(inliers) > best_inliers_count):
+            best_point3d_hom = pt
+            best_inliers_count = len(inliers)
 
-            if best_point3d_hom is None or len(final_inliers) > best_inliers_count:
-                best_point3d_hom = final_point3d_hom
-                best_inliers_count = len(final_inliers)
-        # else:
-        #     print("Failed RANSAC iter")
+        # if 2 * len(inliers) >= len(frames):
+        #     inliers_projections, inliers_proj_mats = zip(*inliers)
+        #     final_point3d_hom = triangulate_multiple_frames(inliers_projections, inliers_proj_mats).reshape(-1, 4)
+        #     final_inliers = find_inliers(final_point3d_hom, frames)
+        #
+        #     if best_point3d_hom is None or len(final_inliers) > best_inliers_count:
+        #         best_point3d_hom = final_point3d_hom
+        #         best_inliers_count = len(final_inliers)
 
-    # if best_point3d_hom is None:
-    #     print("Failed RANSAC")
-    # else:
-    #     print(best_inliers_count, len(frames))
     return best_point3d_hom
 
 
