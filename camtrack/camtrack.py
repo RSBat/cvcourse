@@ -162,15 +162,8 @@ def triangulate_multiple_frames_ransac(projections: List[np.ndarray], proj_mats:
     return best_point3d_hom
 
 
-def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarray],
-                         intrinsic_mat, ids: np.ndarray):
-    def get_proj_mat(view_mat):
-        if view_mat is None:
-            return None
-        return intrinsic_mat @ view_mat
-
-    proj_mats = [get_proj_mat(view_mat) for view_mat in view_mats]
-
+def triangulate_multiple(corner_storage: CornerStorage, proj_mats: List[np.ndarray],
+                         ids: np.ndarray):
     points3d_hom = []
     triangulated_ids = []
     failed_ids = []
@@ -232,6 +225,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                                             cloud)
 
     view_mats = [None] * frame_count
+    proj_mats = [None] * frame_count
     frame_iter = itertools.chain(range(known_view_1[0], frame_count),
                                  range(known_view_1[0] - 1, -1, -1))
     for frame in frame_iter:
@@ -243,6 +237,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                                               iterationsCount=10_000, reprojectionError=MAX_REPROJ_ERROR)
         vm = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
         view_mats[frame] = vm
+        proj_mats[frame] = intrinsic_mat @ vm
 
         if frame % 5 == 0:
             reference = max(0, frame - 10)
@@ -256,7 +251,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                 point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
         if frame % 10 == 0:
-            aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, corners.ids)
+            aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, proj_mats, corners.ids)
             point_cloud_builder.add_points(aa_ids, aa_pts)
             point_cloud_builder.delete_points(failed_ids)
     print()
