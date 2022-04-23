@@ -52,7 +52,10 @@ def create_loss_fn_jax(intrinsic_mat: np.ndarray,
             projected_points = points2d[:2].T
 
             points2d_diff = correspondences.points_2 - projected_points
-            res += (points2d_diff ** 2).sum()
+            errors = jnp.linalg.norm(points2d_diff, axis=1)
+            errors_mask = errors < max_inlier_reprojection_error
+
+            res += (points2d_diff[errors_mask] ** 2).sum()
         return res / len(list_of_corners)
     return f
 
