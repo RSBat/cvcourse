@@ -142,6 +142,7 @@ def triangulate_multiple_frames_ransac(projections: List[np.ndarray], proj_mats:
             best_point3d_hom = pt
             best_inliers_count = len(inliers)
 
+        # almost does not affect quality
         # if 2 * len(inliers) >= frames_count:
         #     inliers_projections, inliers_proj_mats = zip(*inliers)
         #     final_point3d_hom = triangulate_multiple_frames(inliers_projections, inliers_proj_mats).reshape(-1, 4)
