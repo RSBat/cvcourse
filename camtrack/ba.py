@@ -8,14 +8,14 @@ import jax.numpy as jnp
 import optax
 import sortednp as snp
 
-from _camtrack import Correspondences, PointCloudBuilder, view_mat3x4_to_pose, pose_to_view_mat3x4
+from _camtrack import PointCloudBuilder, view_mat3x4_to_pose
 from data3d import Pose
 from corners import FrameCorners
 
 lr = 1e-5
 
 
-def jax_Rodrigues(rvec):
+def jax_Rodrigues(rvec: jnp.ndarray) -> jnp.ndarray:
     theta = jnp.linalg.norm(rvec)
     if theta < 1e-6:
         rotation_mat = jnp.eye(3, dtype=float)
@@ -29,7 +29,7 @@ def jax_Rodrigues(rvec):
     return rotation_mat
 
 
-def to_view_mat(rvecs, tvecs, frame):
+def to_view_mat(rvecs: jnp.ndarray, tvecs: jnp.ndarray, frame: int) -> jnp.ndarray:
     rmat = jax_Rodrigues(rvecs[frame])
     tvec = tvecs[frame]
     pose = Pose(rmat, tvec)
@@ -43,27 +43,28 @@ def create_loss_fn_jax(intrinsic_mat: np.ndarray,
                        list_of_corners: List[FrameCorners],
                        max_inlier_reprojection_error: float,
                        ids: np.ndarray):
+    masks = []
+    matched_corners = []
+    for frame_corners in list_of_corners:
+        ids_1 = ids.flatten()
+        ids_2 = frame_corners.ids.flatten()
+        _, (indices_1, indices_2) = snp.intersect(ids_1, ids_2, indices=True)
+        masks.append(indices_1)
+        matched_corners.append(frame_corners.points[indices_2])
+
     def f(points, rvecs, tvecs):
         res = 0.0
-        for frame, corners in enumerate(list_of_corners):
+        points3d = jnp.pad(points, ((0, 0), (0, 1)), 'constant', constant_values=(1,))
+
+        for frame, (corners, indices) in enumerate(zip(matched_corners, masks)):
             view_mat = to_view_mat(rvecs, tvecs, frame)
             proj_mat = jnp.dot(intrinsic_mat, view_mat)
 
-            ids_1 = ids.flatten()
-            ids_2 = corners.ids.flatten()
-            _, (indices_1, indices_2) = snp.intersect(ids_1, ids_2, indices=True)
-            correspondences = Correspondences(
-                ids_1[indices_1],
-                points[indices_1],
-                corners.points[indices_2]
-            )
-
-            points3d = jnp.pad(correspondences.points_1, ((0, 0), (0, 1)), 'constant', constant_values=(1,))
-            points2d = jnp.dot(proj_mat, points3d.T)
+            points2d = jnp.dot(proj_mat, points3d[indices].T)
             points2d /= points2d[jnp.array([2])]
             projected_points = points2d[:2].T
 
-            points2d_diff = correspondences.points_2 - projected_points
+            points2d_diff = corners - projected_points
             errors = jnp.linalg.norm(points2d_diff, axis=1)
             errors_mask = errors < max_inlier_reprojection_error
 
