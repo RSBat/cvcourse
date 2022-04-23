@@ -192,6 +192,18 @@ def triangulate_multiple(corner_storage: CornerStorage, proj_mats: List[np.ndarr
     return np.asarray(triangulated_ids, dtype=int), points3d, np.asarray(failed_ids, dtype=int)
 
 
+def init_cloud(corner_storage: CornerStorage,
+               known_view_1: Tuple[int, Pose],
+               known_view_2: Tuple[int, Pose],
+               intrinsic_mat: np.ndarray) -> PointCloudBuilder:
+    vm_1 = pose_to_view_mat3x4(known_view_1[1])
+    vm_2 = pose_to_view_mat3x4(known_view_2[1])
+
+    correspondences = build_correspondences(corner_storage[known_view_1[0]], corner_storage[known_view_2[0]])
+    cloud, id_triangulated, _ = triangulate_correspondences(correspondences, vm_1, vm_2, intrinsic_mat, TRIANG_PARAMS)
+    return PointCloudBuilder(id_triangulated, cloud)
+
+
 def track_and_calc_colors(camera_parameters: CameraParameters,
                           corner_storage: CornerStorage,
                           frame_sequence_path: str,
@@ -208,16 +220,10 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     if known_view_1 is None or known_view_2 is None:
         known_view_1, known_view_2 = init_views(corner_storage, intrinsic_mat)
 
-    vm_1 = pose_to_view_mat3x4(known_view_1[1])
-    vm_2 = pose_to_view_mat3x4(known_view_2[1])
+    point_cloud_builder = init_cloud(corner_storage, known_view_1, known_view_2, intrinsic_mat)
 
-    correspondences = build_correspondences(corner_storage[known_view_1[0]], corner_storage[known_view_2[0]])
-    cloud, id_triangulated, _ = triangulate_correspondences(correspondences, vm_1, vm_2, intrinsic_mat, TRIANG_PARAMS)
-    point_cloud_builder = PointCloudBuilder(id_triangulated,
-                                            cloud)
-
-    view_mats = [None] * frame_count
-    proj_mats = [None] * frame_count
+    view_mats: List[Optional[np.ndarray]] = [None] * frame_count
+    proj_mats: List[Optional[np.ndarray]] = [None] * frame_count
     frame_iter = itertools.chain(range(known_view_1[0], frame_count),
                                  range(known_view_1[0] - 1, -1, -1))
     for n, frame in enumerate(frame_iter):
