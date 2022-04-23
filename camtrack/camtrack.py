@@ -128,23 +128,24 @@ def triangulate_multiple_frames_ransac(projections: List[np.ndarray], proj_mats:
     best_point3d_hom = None
     best_inliers_count = 0
     frames = list(zip(projections, proj_mats))
+    frames_count = len(frames)
     for _ in range(10):
-        if best_inliers_count == len(frames):
+        if best_inliers_count == frames_count:
             return best_point3d_hom
 
-        n = rnd.randrange(2, len(frames))
+        n = rnd.randrange(2, frames_count)
         base = rnd.choices(frames, k=n)
         base_projections, base_proj_mats = zip(*base)
 
         pt = triangulate_multiple_frames(base_projections, base_proj_mats).reshape(-1, 4)
         inliers = find_inliers(pt, frames)
 
-        successful = 2 * len(inliers) >= len(frames)
+        successful = 2 * len(inliers) >= frames_count
         if successful and (best_point3d_hom is None or len(inliers) > best_inliers_count):
             best_point3d_hom = pt
             best_inliers_count = len(inliers)
 
-        # if 2 * len(inliers) >= len(frames):
+        # if 2 * len(inliers) >= frames_count:
         #     inliers_projections, inliers_proj_mats = zip(*inliers)
         #     final_point3d_hom = triangulate_multiple_frames(inliers_projections, inliers_proj_mats).reshape(-1, 4)
         #     final_inliers = find_inliers(final_point3d_hom, frames)
