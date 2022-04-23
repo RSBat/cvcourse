@@ -38,38 +38,53 @@ TRIANG_PARAMS = TriangulationParameters(max_reprojection_error=MAX_REPROJ_ERROR,
                                         min_depth=0)
 
 
-def recover_pose(corners_1, corners_2, intrinsic_mat) -> Optional[Pose]:
+def recover_pose(corners_1, corners_2, intrinsic_mat) -> Tuple[Optional[Pose], float, float]:
     correspondences = build_correspondences(corners_1, corners_2)
     E, mask = cv2.findEssentialMat(correspondences.points_1, correspondences.points_2,
                                    intrinsic_mat, method=cv2.RANSAC)
     pose_inliers, R, t, pose_mask = cv2.recoverPose(E, correspondences.points_1, correspondences.points_2,
                                                     intrinsic_mat, mask=mask)
 
+    vm_1 = eye3x4()
     vm_2 = np.hstack([R, t])
 
     H, homography_mask = cv2.findHomography(correspondences.points_1, correspondences.points_2,
                                             method=cv2.RANSAC, ransacReprojThreshold=MAX_REPROJ_ERROR)
 
+    _, triang_ids, median_cos = triangulate_correspondences(correspondences, vm_1, vm_2,
+                                                            intrinsic_mat, INITIAL_TRIANG_PARAMS)
+
+    if triang_ids.shape[0] < 20:
+        return view_mat3x4_to_pose(vm_2), 1, 1
+
     ratio = np.count_nonzero(homography_mask) / pose_inliers if pose_inliers != 0 else 1
-    return view_mat3x4_to_pose(vm_2), ratio
+    return view_mat3x4_to_pose(vm_2), ratio, median_cos
 
 
 def init_views(corner_storage, intrinsic_mat):
+    eps = 1e-2
+
     best_result = None
     best_ratio = 1.
+    best_cos = 1.
     for offset in [50, 30, 20]:
         for frame_1 in range(len(corner_storage) - offset):
             frame_2 = frame_1 + offset
-            pose_2, ratio = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
+            pose_2, ratio, median_cos = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
+            print(f"\rFrames: {frame_1} {frame_2}, quality: {1 - ratio}, cos: {median_cos}", end="")
 
-            if best_result is None or ratio < best_ratio:
+            better_ratio = ratio + eps < best_ratio
+            better_angle = np.isclose(ratio, best_ratio, eps) and median_cos + eps < best_cos
+            if best_result is None or better_ratio or better_angle:
                 pose_1 = view_mat3x4_to_pose(eye3x4())
                 known_view_1 = frame_1, pose_1
                 known_view_2 = frame_2, pose_2
 
                 best_result = known_view_1, known_view_2
                 best_ratio = ratio
-                print(f"\rSelected frames: {frame_1} {frame_2}, quality: {1 - ratio}", end="")
+                best_cos = median_cos
+
+    print(f"\rSelected frames: {best_result[0][0]} {best_result[1][0]}, quality: {1 - best_ratio}, cos: {best_cos}", end="")
     print()
     return best_result
 
