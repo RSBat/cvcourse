@@ -163,14 +163,14 @@ def triangulate_multiple_frames_ransac(projections: List[np.ndarray], proj_mats:
 
 
 def triangulate_multiple(corner_storage: CornerStorage, proj_mats: List[np.ndarray],
-                         ids: np.ndarray):
+                         ids: np.ndarray, step: int = 5):
     points3d_hom = []
     triangulated_ids = []
     failed_ids = []
     for pt_id in ids:
         projections = []
         selected_proj_mats = []
-        for corners, proj_mat in zip(corner_storage[::5], proj_mats[::5]):
+        for corners, proj_mat in zip(corner_storage[::step], proj_mats[::step]):
             if proj_mat is None:
                 continue
             if not snp.issubset(pt_id, corners.ids.flatten()):
@@ -256,8 +256,23 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
             point_cloud_builder.delete_points(failed_ids)
     print()
 
-    # view_mats[known_view_1[0]] = vm_1
-    # view_mats[known_view_2[0]] = vm_2
+    # view_mats = [None] * frame_count
+    # proj_mats = [None] * frame_count
+    # for frame in range(frame_count):
+    #     corners = corner_storage[frame]
+    #     print(f"\rReprocessing frame {frame + 1}/{frame_count}", end="")
+    #     _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
+    #     _, rvec, tvec, _ = cv2.solvePnPRansac(point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
+    #                                           intrinsic_mat, None,
+    #                                           iterationsCount=10_000, reprojectionError=MAX_REPROJ_ERROR)
+    #     vm = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
+    #     view_mats[frame] = vm
+    #     proj_mats[frame] = intrinsic_mat @ vm
+
+    aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, proj_mats,
+                                                      point_cloud_builder.ids, step=2)
+    point_cloud_builder.add_points(aa_ids, aa_pts)
+    point_cloud_builder.delete_points(failed_ids)
 
     # run bundle adjustment only if we don't have too many points
     # if point_cloud_builder.points.shape[0] < 5000:
