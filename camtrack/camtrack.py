@@ -67,7 +67,7 @@ def init_views(corner_storage, intrinsic_mat):
     best_result = None
     best_ratio = 1.
     best_cos = 1.
-    for offset in [50, 30, 20]:
+    for offset in [50, 30, 20, 10]:
         for frame_1 in range(len(corner_storage) - offset):
             frame_2 = frame_1 + offset
             pose_2, ratio, median_cos = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
