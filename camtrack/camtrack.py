@@ -4,6 +4,7 @@ __all__ = [
     'track_and_calc_colors'
 ]
 
+import itertools
 import random
 from typing import List, Optional, Tuple
 
@@ -69,6 +70,7 @@ def init_views(corner_storage, intrinsic_mat):
                 best_result = known_view_1, known_view_2
                 best_ratio = ratio
                 print(f"\rSelected frames: {frame_1} {frame_2}, quality: {1 - ratio}", end="")
+    print()
     return best_result
 
 
@@ -162,7 +164,12 @@ def triangulate_multiple_frames_ransac(projections: List[np.ndarray], proj_mats:
 
 def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarray],
                          intrinsic_mat, ids: np.ndarray):
-    proj_mats = [intrinsic_mat @ view_mat for view_mat in view_mats]
+    def get_proj_mat(view_mat):
+        if view_mat is None:
+            return None
+        return intrinsic_mat @ view_mat
+
+    proj_mats = [get_proj_mat(view_mat) for view_mat in view_mats]
 
     points3d_hom = []
     triangulated_ids = []
@@ -171,6 +178,8 @@ def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarr
         projections = []
         selected_proj_mats = []
         for corners, proj_mat in zip(corner_storage[::5], proj_mats[::5]):
+            if proj_mat is None:
+                continue
             if not snp.issubset(pt_id, corners.ids.flatten()):
                 continue
             _, (idx, _) = snp.intersect(corners.ids.flatten(), pt_id, indices=True)
@@ -209,6 +218,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         camera_parameters,
         rgb_sequence[0].shape[0]
     )
+    frame_count = len(corner_storage)
 
     if True or known_view_1 is None or known_view_2 is None:
         known_view_1, known_view_2 = init_views(corner_storage, intrinsic_mat)
@@ -221,27 +231,35 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     point_cloud_builder = PointCloudBuilder(id_triangulated,
                                             cloud)
 
-    view_mats = []
-    for frame, corners in enumerate(corner_storage):
-        print(f"\rProcessing frame {frame + 1}/{len(corner_storage)}", end="")
+    view_mats = [None] * frame_count
+    frame_iter = itertools.chain(range(known_view_1[0], frame_count),
+                                 range(known_view_1[0] - 1, -1, -1))
+    for frame in frame_iter:
+        corners = corner_storage[frame]
+        print(f"\rProcessing frame {frame + 1}/{frame_count}", end="")
         _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
         _, rvec, tvec, _ = cv2.solvePnPRansac(point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
                                               intrinsic_mat, None,
                                               iterationsCount=10_000, reprojectionError=MAX_REPROJ_ERROR)
         vm = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
-        view_mats.append(vm)
+        view_mats[frame] = vm
 
         if frame % 5 == 0:
             reference = max(0, frame - 10)
-            correspondences = build_correspondences(corner_storage[reference], corners)
-            new_cloud, new_triang_id, _ = triangulate_correspondences(correspondences, view_mats[reference], vm,
-                                                                      intrinsic_mat, TRIANG_PARAMS)
-            point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
+            if view_mats[reference] is None:
+                reference = min(frame + 10, frame_count - 1)
+
+            if view_mats[reference] is not None:
+                correspondences = build_correspondences(corner_storage[reference], corners)
+                new_cloud, new_triang_id, _ = triangulate_correspondences(correspondences, view_mats[reference], vm,
+                                                                          intrinsic_mat, TRIANG_PARAMS)
+                point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
         if frame % 10 == 0:
             aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, corners.ids)
             point_cloud_builder.add_points(aa_ids, aa_pts)
             point_cloud_builder.delete_points(failed_ids)
+    print()
 
     # view_mats[known_view_1[0]] = vm_1
     # view_mats[known_view_2[0]] = vm_2
