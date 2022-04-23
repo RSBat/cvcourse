@@ -27,7 +27,6 @@ from _camtrack import (
     view_mat3x4_to_pose, rodrigues_and_translation_to_view_mat3x4, eye3x4,
 )
 
-
 MAX_REPROJ_ERROR = 5.0
 INITIAL_TRIANG_PARAMS = TriangulationParameters(max_reprojection_error=MAX_REPROJ_ERROR,
                                                 min_triangulation_angle_deg=2,
@@ -47,6 +46,9 @@ def recover_pose(corners_1, corners_2, intrinsic_mat) -> Optional[Pose]:
 
     vm_1 = eye3x4()
     vm_2 = np.hstack([R, t])
+
+    # H, homography_mask = cv2.findHomography(correspondences.points_1, correspondences.points_2,
+    #                                         method=cv2.RANSAC, ransacReprojThreshold=MAX_REPROJ_ERROR)
 
     cloud, id_triangulated, avg_cos = triangulate_correspondences(correspondences, vm_1, vm_2,
                                                                   intrinsic_mat, INITIAL_TRIANG_PARAMS)
@@ -234,7 +236,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         #                                                               intrinsic_mat, TRIANG_PARAMS)
         #     point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
-        if frame >= 25 and frame % 5 == 0:
+        if frame >= 25 and frame % 10 == 0:
             aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, corners.ids)
             point_cloud_builder.add_points(aa_ids, aa_pts)
             point_cloud_builder.delete_points(failed_ids)
