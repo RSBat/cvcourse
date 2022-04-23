@@ -191,8 +191,11 @@ def triangulate_multiple(corner_storage: CornerStorage, view_mats: List[np.ndarr
         else:
             failed_ids.append(pt_id)
 
-    points3d = cv2.convertPointsFromHomogeneous(np.asarray(points3d_hom)).reshape(-1, 3)
-    return np.asarray(triangulated_ids), points3d, np.asarray(failed_ids, dtype=int)
+    if len(points3d_hom) > 0:
+        points3d = cv2.convertPointsFromHomogeneous(np.asarray(points3d_hom)).reshape(-1, 3)
+    else:
+        points3d = np.asarray([], dtype=float)
+    return np.asarray(triangulated_ids, dtype=int), points3d, np.asarray(failed_ids, dtype=int)
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -207,7 +210,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         rgb_sequence[0].shape[0]
     )
 
-    if known_view_1 is None or known_view_2 is None:
+    if True or known_view_1 is None or known_view_2 is None:
         known_view_1, known_view_2 = init_views(corner_storage, intrinsic_mat)
 
     vm_1 = pose_to_view_mat3x4(known_view_1[1])
@@ -228,14 +231,14 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         vm = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
         view_mats.append(vm)
 
-        # if frame > 10:
-        #     reference = max(0, frame - 10)
-        #     correspondences = build_correspondences(corner_storage[reference], corners)
-        #     new_cloud, new_triang_id, _ = triangulate_correspondences(correspondences, view_mats[reference], vm,
-        #                                                               intrinsic_mat, TRIANG_PARAMS)
-        #     point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
+        if frame % 5 == 0:
+            reference = max(0, frame - 10)
+            correspondences = build_correspondences(corner_storage[reference], corners)
+            new_cloud, new_triang_id, _ = triangulate_correspondences(correspondences, view_mats[reference], vm,
+                                                                      intrinsic_mat, TRIANG_PARAMS)
+            point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
-        if frame >= 25 and frame % 10 == 0:
+        if frame % 10 == 0:
             aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, view_mats, intrinsic_mat, corners.ids)
             point_cloud_builder.add_points(aa_ids, aa_pts)
             point_cloud_builder.delete_points(failed_ids)
