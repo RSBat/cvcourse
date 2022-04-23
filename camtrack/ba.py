@@ -7,6 +7,7 @@ import numpy as np
 import jax.numpy as jnp
 import optax
 import sortednp as snp
+from jax import jit
 
 from _camtrack import PointCloudBuilder
 from corners import FrameCorners
@@ -16,15 +17,12 @@ lr = 1e-5
 
 def jax_Rodrigues(rvec: jnp.ndarray) -> jnp.ndarray:
     theta = jnp.linalg.norm(rvec)
-    if theta < 1e-6:
-        rotation_mat = jnp.eye(3, dtype=float)
-    else:
-        r = rvec / theta
-        I = jnp.eye(3, dtype=float)
-        r_rT = r @ r.T
-        r_cross = jnp.cross(r.T, -jnp.identity(3))
+    r = jnp.where(theta < 1e-6, rvec, rvec / theta)
+    I = jnp.eye(3, dtype=float)
+    r_rT = r @ r.T
+    r_cross = jnp.cross(r.T, -jnp.identity(3))
 
-        rotation_mat = jnp.cos(theta) * I + (1 - jnp.cos(theta)) * r_rT + jnp.sin(theta) * r_cross
+    rotation_mat = jnp.cos(theta) * I + (1 - jnp.cos(theta)) * r_rT + jnp.sin(theta) * r_cross
     return rotation_mat
 
 
@@ -35,6 +33,12 @@ def to_view_mat(rvecs: jnp.ndarray, tvecs: jnp.ndarray, frame: int) -> jnp.ndarr
         rmat,
         tvec.reshape(-1, 1)
     ))
+
+
+@jit
+def to_view_mats(rvecs, tvecs):
+    rmats = jax.vmap(jax_Rodrigues)(rvecs)
+    return jnp.concatenate([rmats, tvecs.reshape(-1, 3, 1)], axis=2)
 
 
 def create_loss_fn_jax(intrinsic_mat: np.ndarray,
@@ -54,9 +58,10 @@ def create_loss_fn_jax(intrinsic_mat: np.ndarray,
         res = 0.0
         points3d = jnp.pad(points, ((0, 0), (0, 1)), 'constant', constant_values=(1,))
 
+        view_mats = to_view_mats(rvecs, tvecs)
+        proj_mats = intrinsic_mat @ view_mats
         for frame, (corners, indices) in enumerate(zip(matched_corners, masks)):
-            view_mat = to_view_mat(rvecs, tvecs, frame)
-            proj_mat = jnp.dot(intrinsic_mat, view_mat)
+            proj_mat = proj_mats[frame]
 
             points2d = jnp.dot(proj_mat, points3d[indices].T)
             points2d /= points2d[jnp.array([2])]
@@ -66,9 +71,9 @@ def create_loss_fn_jax(intrinsic_mat: np.ndarray,
             errors = jnp.linalg.norm(points2d_diff, axis=1)
             errors_mask = errors < max_inlier_reprojection_error
 
-            res += (points2d_diff[errors_mask] ** 2).sum()
+            res += jnp.where(errors_mask.reshape(-1, 1), points2d_diff**2, 0).sum()
         return res / len(list_of_corners)
-    return f
+    return jit(f)
 
 
 def run_bundle_adjustment(intrinsic_mat: np.ndarray,
@@ -95,7 +100,7 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
     loss_scale = 100 / initial_loss
     print("Initial loss:", initial_loss)
 
-    loss_fn_grad = jax.grad(loss_fn_jax, argnums=(0, 1, 2))
+    loss_fn_grad = jit(jax.grad(loss_fn_jax, argnums=(0, 1, 2)))
     pt_adam = optax.adam(lr)
     pt_state = pt_adam.init(jpt)
     rv_adam = optax.adam(lr)
