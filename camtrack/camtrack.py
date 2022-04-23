@@ -44,32 +44,31 @@ def recover_pose(corners_1, corners_2, intrinsic_mat) -> Optional[Pose]:
     pose_inliers, R, t, pose_mask = cv2.recoverPose(E, correspondences.points_1, correspondences.points_2,
                                                     intrinsic_mat, mask=mask)
 
-    vm_1 = eye3x4()
     vm_2 = np.hstack([R, t])
 
-    # H, homography_mask = cv2.findHomography(correspondences.points_1, correspondences.points_2,
-    #                                         method=cv2.RANSAC, ransacReprojThreshold=MAX_REPROJ_ERROR)
+    H, homography_mask = cv2.findHomography(correspondences.points_1, correspondences.points_2,
+                                            method=cv2.RANSAC, ransacReprojThreshold=MAX_REPROJ_ERROR)
 
-    cloud, id_triangulated, avg_cos = triangulate_correspondences(correspondences, vm_1, vm_2,
-                                                                  intrinsic_mat, INITIAL_TRIANG_PARAMS)
-    return view_mat3x4_to_pose(vm_2), id_triangulated.shape[0]
+    ratio = np.count_nonzero(homography_mask) / pose_inliers if pose_inliers != 0 else 1
+    return view_mat3x4_to_pose(vm_2), ratio
 
 
 def init_views(corner_storage, intrinsic_mat):
     best_result = None
-    max_triangulated_points = 0
+    best_ratio = 1.
     for offset in [50, 30, 20]:
         for frame_1 in range(len(corner_storage) - offset):
             frame_2 = frame_1 + offset
-            pose_2, triangulated_points = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
+            pose_2, ratio = recover_pose(corner_storage[frame_1], corner_storage[frame_2], intrinsic_mat)
 
-            if best_result is None or triangulated_points > max_triangulated_points:
+            if best_result is None or ratio < best_ratio:
                 pose_1 = view_mat3x4_to_pose(eye3x4())
                 known_view_1 = frame_1, pose_1
                 known_view_2 = frame_2, pose_2
 
                 best_result = known_view_1, known_view_2
-                max_triangulated_points = triangulated_points
+                best_ratio = ratio
+                print(f"\rSelected frames: {frame_1} {frame_2}, quality: {1 - ratio}", end="")
     return best_result
 
 
@@ -221,7 +220,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
     view_mats = []
     for frame, corners in enumerate(corner_storage):
-        print(f"\rProcessing frame {frame + 1}/{len(corner_storage)}")
+        print(f"\rProcessing frame {frame + 1}/{len(corner_storage)}", end="")
         _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
         _, rvec, tvec, _ = cv2.solvePnPRansac(point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
                                               intrinsic_mat, None,
