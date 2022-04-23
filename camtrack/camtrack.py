@@ -103,20 +103,13 @@ def triangulate_multiple_frames(projections: List[np.ndarray], proj_mats: List[n
     return point3d_hom
 
 
-def proj_hom(points3d_hom, proj_mat):
-    points2d = np.dot(proj_mat, points3d_hom.T)
-    points2d /= points2d[[2]]
-    return points2d[:2].T
-
-
 def find_inliers(pt, frames):
     inliers = []
 
     proj_mats = np.asarray([proj_mat for _, proj_mat in frames])
-    projections = np.asarray([projection for projection, _ in frames]);
+    projections = np.asarray([projection for projection, _ in frames])
     points2d_hom = (proj_mats @ pt.T).reshape(-1, 3)
     points2d = (points2d_hom / points2d_hom[:, 2].reshape(-1, 1))[:, :2]
-    # points2d = proj_hom(pt, proj_mats)
     points2d_diff = projections - points2d
     errors = np.linalg.norm(points2d_diff, axis=1)
     mask = errors < MAX_REPROJ_ERROR
@@ -275,14 +268,14 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     point_cloud_builder.delete_points(failed_ids)
 
     # run bundle adjustment only if we don't have too many points
-    # if point_cloud_builder.points.shape[0] < 5000:
-    #     run_bundle_adjustment(
-    #         intrinsic_mat,
-    #         corner_storage,  # noqa: type
-    #         MAX_REPROJ_ERROR,
-    #         view_mats,
-    #         point_cloud_builder,
-    #     )
+    if point_cloud_builder.points.shape[0] < 5000:
+        run_bundle_adjustment(
+            intrinsic_mat,
+            corner_storage,  # noqa: type
+            MAX_REPROJ_ERROR,
+            view_mats,
+            point_cloud_builder,
+        )
 
     calc_point_cloud_colors(
         point_cloud_builder,
