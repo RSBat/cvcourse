@@ -89,19 +89,6 @@ def init_views(corner_storage, intrinsic_mat):
     return best_result
 
 
-def intersect_all(corner_storage: CornerStorage, frames: List[int]):
-    intersection_ids = corner_storage[frames[0]].ids
-    for frame in frames:
-        intersection_ids = snp.intersect(intersection_ids.flatten(), corner_storage[frame].ids.flatten())
-
-    points = []
-    for frame in frames:
-        _, (_, idx) = snp.intersect(intersection_ids.flatten(), corner_storage[frame].ids.flatten(), indices=True)
-        points.append(corner_storage[frame].points[idx])
-
-    return intersection_ids, points
-
-
 def triangulate_multiple_frames(projections: List[np.ndarray], proj_mats: List[np.ndarray]) -> np.ndarray:
     """
     Triangulate using DLT
@@ -170,19 +157,20 @@ def triangulate_multiple_frames_ransac(projections: List[np.ndarray], proj_mats:
 
 
 def triangulate_multiple(corner_storage: CornerStorage, proj_mats: List[np.ndarray],
-                         ids: np.ndarray, step: int = 5):
+                         point_ids: np.ndarray, step: int = 5):
     points3d_hom = []
     triangulated_ids = []
     failed_ids = []
-    for pt_id in ids:
+    corner_ids = [corners.ids.flatten() for corners in corner_storage]
+    for pt_id in point_ids:
         projections = []
         selected_proj_mats = []
-        for corners, proj_mat in zip(corner_storage[::step], proj_mats[::step]):
+        for corners, ids, proj_mat in zip(corner_storage[::step], corner_ids[::step], proj_mats[::step]):
             if proj_mat is None:
                 continue
-            if not snp.issubset(pt_id, corners.ids.flatten()):
+            _, (idx, _) = snp.intersect(ids, pt_id, indices=True)
+            if idx.shape[0] == 0:
                 continue
-            _, (idx, _) = snp.intersect(corners.ids.flatten(), pt_id, indices=True)
             projections.append(corners.points[idx][0])
             selected_proj_mats.append(proj_mat)
 
