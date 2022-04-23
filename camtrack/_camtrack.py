@@ -309,6 +309,13 @@ class PointCloudBuilder:
                                           indices=True)
         self._points[idx_1] = points[idx_2]
 
+    def delete_points(self, ids: np.ndarray):
+        _, (idx, _) = snp.intersect(self._ids.flatten(), ids.flatten(),
+                                    indices=True)
+        self._ids = np.delete(self._ids, idx, axis=0)
+        self._points = np.delete(self._points, idx, axis=0)
+        self._sort_data()
+
     def build_point_cloud(self) -> PointCloud:
         return PointCloud(self.ids, self.points, self.colors)
 
