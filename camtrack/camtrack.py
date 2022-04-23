@@ -236,7 +236,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     proj_mats = [None] * frame_count
     frame_iter = itertools.chain(range(known_view_1[0], frame_count),
                                  range(known_view_1[0] - 1, -1, -1))
-    for n, frame in frame_iter:
+    for n, frame in enumerate(frame_iter):
         corners = corner_storage[frame]
         print(f"\rProcessing frame {frame + 1} ({n + 1}/{frame_count})", end="")
         _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
@@ -283,14 +283,14 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     point_cloud_builder.delete_points(failed_ids)
 
     # run bundle adjustment only if we don't have too many points
-    # if frame_count < 100 and point_cloud_builder.points.shape[0] < 5000:
-    #     view_mats = run_bundle_adjustment(
-    #         intrinsic_mat,
-    #         corner_storage,  # noqa: type
-    #         MAX_REPROJ_ERROR,
-    #         view_mats,
-    #         point_cloud_builder,
-    #     )
+    if frame_count < 100 and point_cloud_builder.points.shape[0] < 5000:
+        view_mats = run_bundle_adjustment(
+            intrinsic_mat,
+            corner_storage,  # noqa: type
+            MAX_REPROJ_ERROR,
+            view_mats,
+            point_cloud_builder,
+        )
 
     calc_point_cloud_colors(
         point_cloud_builder,
