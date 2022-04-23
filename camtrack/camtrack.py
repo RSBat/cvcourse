@@ -29,12 +29,8 @@ from _camtrack import (
 )
 
 MAX_REPROJ_ERROR = 5.0
-INITIAL_TRIANG_PARAMS = TriangulationParameters(max_reprojection_error=MAX_REPROJ_ERROR,
-                                                min_triangulation_angle_deg=2,
-                                                min_depth=0)
-
 TRIANG_PARAMS = TriangulationParameters(max_reprojection_error=MAX_REPROJ_ERROR,
-                                        min_triangulation_angle_deg=1,
+                                        min_triangulation_angle_deg=2,
                                         min_depth=0)
 
 
@@ -52,7 +48,7 @@ def recover_pose(corners_1, corners_2, intrinsic_mat) -> Tuple[Optional[Pose], f
                                             method=cv2.RANSAC, ransacReprojThreshold=MAX_REPROJ_ERROR)
 
     _, triang_ids, median_cos = triangulate_correspondences(correspondences, vm_1, vm_2,
-                                                            intrinsic_mat, INITIAL_TRIANG_PARAMS)
+                                                            intrinsic_mat, TRIANG_PARAMS)
 
     if triang_ids.shape[0] < 20:
         return view_mat3x4_to_pose(vm_2), 1, 1
