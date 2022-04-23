@@ -13,6 +13,7 @@ import numpy as np
 import sortednp as snp
 
 from ba import run_bundle_adjustment
+from _corners import FrameCorners
 from corners import CornerStorage
 from data3d import CameraParameters, PointCloud, Pose
 import frameseq
@@ -204,6 +205,19 @@ def init_cloud(corner_storage: CornerStorage,
     return PointCloudBuilder(id_triangulated, cloud)
 
 
+def find_view_mat(pc_builder: PointCloudBuilder,
+                  corners: FrameCorners,
+                  intrinsic_mat: np.ndarray) -> np.ndarray:
+    _, (lhs, rhs) = snp.intersect(pc_builder.ids.flatten(), corners.ids.flatten(), indices=True)
+    _, rvec, tvec, _ = cv2.solvePnPRansac(
+        pc_builder.points[lhs].copy(), corners.points[rhs].copy(),
+        intrinsic_mat, None,
+        iterationsCount=10_000, reprojectionError=MAX_REPROJ_ERROR,
+    )
+    view_mat = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
+    return view_mat
+
+
 def track_and_calc_colors(camera_parameters: CameraParameters,
                           corner_storage: CornerStorage,
                           frame_sequence_path: str,
@@ -227,15 +241,9 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     frame_iter = itertools.chain(range(known_view_1[0], frame_count),
                                  range(known_view_1[0] - 1, -1, -1))
     for n, frame in enumerate(frame_iter):
-        corners = corner_storage[frame]
         print(f"\rProcessing frame {frame + 1} ({n + 1}/{frame_count})", end="")
-        _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
-        _, rvec, tvec, _ = cv2.solvePnPRansac(
-            point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
-            intrinsic_mat, None,
-            iterationsCount=10_000, reprojectionError=MAX_REPROJ_ERROR
-        )
-        view_mat = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
+        corners = corner_storage[frame]
+        view_mat = find_view_mat(point_cloud_builder, corners, intrinsic_mat)
         view_mats[frame] = view_mat
         proj_mats[frame] = intrinsic_mat @ view_mat
 
