@@ -205,7 +205,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     )
     frame_count = len(corner_storage)
 
-    if True or known_view_1 is None or known_view_2 is None:
+    if known_view_1 is None or known_view_2 is None:
         known_view_1, known_view_2 = init_views(corner_storage, intrinsic_mat)
 
     vm_1 = pose_to_view_mat3x4(known_view_1[1])
@@ -224,12 +224,14 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         corners = corner_storage[frame]
         print(f"\rProcessing frame {frame + 1} ({n + 1}/{frame_count})", end="")
         _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
-        _, rvec, tvec, _ = cv2.solvePnPRansac(point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
-                                              intrinsic_mat, None,
-                                              iterationsCount=10_000, reprojectionError=MAX_REPROJ_ERROR)
-        vm = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
-        view_mats[frame] = vm
-        proj_mats[frame] = intrinsic_mat @ vm
+        _, rvec, tvec, _ = cv2.solvePnPRansac(
+            point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
+            intrinsic_mat, None,
+            iterationsCount=10_000, reprojectionError=MAX_REPROJ_ERROR
+        )
+        view_mat = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
+        view_mats[frame] = view_mat
+        proj_mats[frame] = intrinsic_mat @ view_mat
 
         if frame % 5 == 0:
             reference = max(0, frame - 10)
@@ -238,32 +240,21 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
             if view_mats[reference] is not None:
                 correspondences = build_correspondences(corner_storage[reference], corners)
-                new_cloud, new_triang_id, _ = triangulate_correspondences(correspondences, view_mats[reference], vm,
-                                                                          intrinsic_mat, TRIANG_PARAMS)
+                new_cloud, new_triang_id, _ = triangulate_correspondences(
+                    correspondences, view_mats[reference], view_mat,
+                    intrinsic_mat, TRIANG_PARAMS
+                )
                 point_cloud_builder.add_only_new_points(new_triang_id, new_cloud)
 
         if frame % 10 == 0:
-            aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, proj_mats, corners.ids)
-            point_cloud_builder.add_points(aa_ids, aa_pts)
+            multi_ids, multi_pts, failed_ids = triangulate_multiple(corner_storage, proj_mats, corners.ids)
+            point_cloud_builder.add_points(multi_ids, multi_pts)
             point_cloud_builder.delete_points(failed_ids)
     print()
 
-    # view_mats = [None] * frame_count
-    # proj_mats = [None] * frame_count
-    # for frame in range(frame_count):
-    #     corners = corner_storage[frame]
-    #     print(f"\rReprocessing frame {frame + 1}/{frame_count}", end="")
-    #     _, (lhs, rhs) = snp.intersect(point_cloud_builder.ids.flatten(), corners.ids.flatten(), indices=True)
-    #     _, rvec, tvec, _ = cv2.solvePnPRansac(point_cloud_builder.points[lhs].copy(), corners.points[rhs].copy(),
-    #                                           intrinsic_mat, None,
-    #                                           iterationsCount=10_000, reprojectionError=MAX_REPROJ_ERROR)
-    #     vm = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
-    #     view_mats[frame] = vm
-    #     proj_mats[frame] = intrinsic_mat @ vm
-
-    aa_ids, aa_pts, failed_ids = triangulate_multiple(corner_storage, proj_mats,
-                                                      point_cloud_builder.ids, step=2)
-    point_cloud_builder.add_points(aa_ids, aa_pts)
+    multi_ids, multi_pts, failed_ids = triangulate_multiple(corner_storage, proj_mats,
+                                                            point_cloud_builder.ids, step=2)
+    point_cloud_builder.add_points(multi_ids, multi_pts)
     point_cloud_builder.delete_points(failed_ids)
 
     # run bundle adjustment only if we don't have too many points
