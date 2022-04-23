@@ -8,8 +8,7 @@ import jax.numpy as jnp
 import optax
 import sortednp as snp
 
-from _camtrack import PointCloudBuilder, view_mat3x4_to_pose
-from data3d import Pose
+from _camtrack import PointCloudBuilder
 from corners import FrameCorners
 
 lr = 1e-5
@@ -32,10 +31,9 @@ def jax_Rodrigues(rvec: jnp.ndarray) -> jnp.ndarray:
 def to_view_mat(rvecs: jnp.ndarray, tvecs: jnp.ndarray, frame: int) -> jnp.ndarray:
     rmat = jax_Rodrigues(rvecs[frame])
     tvec = tvecs[frame]
-    pose = Pose(rmat, tvec)
     return jnp.hstack((
-        pose.r_mat.T,
-        pose.r_mat.T @ -pose.t_vec.reshape(-1, 1)
+        rmat,
+        tvec.reshape(-1, 1)
     ))
 
 
@@ -82,9 +80,14 @@ def run_bundle_adjustment(intrinsic_mat: np.ndarray,
                                      pc_builder.ids)
     jpt = jnp.copy(pc_builder.points)
 
-    poses = [view_mat3x4_to_pose(view_mat) for view_mat in view_mats]
-    rvecs = [cv2.Rodrigues(pose.r_mat)[0] for pose in poses]
-    tvecs = [pose.t_vec for pose in poses]
+    rvecs = []
+    tvecs = []
+    for view_mat in view_mats:
+        r_mat = view_mat[:, :3]
+        t_vec = view_mat[:, 3]
+        rvecs.append(cv2.Rodrigues(r_mat)[0])
+        tvecs.append(t_vec)
+
     jrv = jnp.asarray(rvecs)
     jtv = jnp.asarray(tvecs)
 
