@@ -12,7 +12,7 @@ from jax import jit
 from _camtrack import PointCloudBuilder
 from corners import FrameCorners
 
-lr = 1e-5
+lr = 2e-5
 
 
 def jax_Rodrigues(rvec: jnp.ndarray) -> jnp.ndarray:
